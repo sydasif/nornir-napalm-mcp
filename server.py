@@ -195,6 +195,34 @@ def run_napalm_getter(device_name: str, getter: str) -> Any:
     return data.get(getter, data)
 
 
+@mcp.tool()
+def reload_inventory() -> dict[str, Any]:
+    """
+    Reload the network inventory from disk.
+
+    Discards the in-memory inventory cache and re-reads
+    inventory/hosts.yaml, groups.yaml, and defaults.yaml. Use after
+    editing the inventory files to pick up new or removed devices,
+    or after a device failure has caused Nornir to mark a host as
+    failed and skip it on subsequent calls.
+
+    Returns a diff-style summary (previous/current/added/removed/total)
+    so the caller can verify the reload had the expected effect.
+    """
+    global _nornir
+    previous = sorted(_nornir.inventory.hosts) if _nornir is not None else []
+    _nornir = None
+    rebuilt = _get_nornir()
+    current = sorted(rebuilt.inventory.hosts)
+    return {
+        "previous_hosts": previous,
+        "current_hosts": current,
+        "added": sorted(set(current) - set(previous)),
+        "removed": sorted(set(previous) - set(current)),
+        "total": len(current),
+    }
+
+
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------

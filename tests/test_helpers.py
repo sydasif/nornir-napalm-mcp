@@ -6,6 +6,8 @@ the `fake_nornir` fixture — no real devices or SSH sessions involved.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 import server
@@ -109,3 +111,50 @@ def test_run_napalm_getter_rejects_invalid_name() -> None:
 def test_run_napalm_getter_returns_payload() -> None:
     out = server.run_napalm_getter("spine-01", "arp_table")
     assert out == {"ok": True}
+
+
+def test_reload_inventory_initial_summary() -> None:
+    report = server.reload_inventory()
+    assert report["total"] == 2
+    assert set(report["current_hosts"]) == {"spine-01", "leaf-01"}
+    assert report["previous_hosts"] == []
+    assert sorted(report["added"]) == ["leaf-01", "spine-01"]
+    assert report["removed"] == []
+
+
+def test_reload_inventory_detects_added_host(monkeypatch: pytest.MonkeyPatch) -> None:
+    server.reload_inventory()
+    new_fake = SimpleNamespace(
+        inventory=SimpleNamespace(
+            hosts={
+                "router-99": SimpleNamespace(
+                    name="router-99",
+                    hostname="10.99.0.1",
+                    platform="eos",
+                    groups=[SimpleNamespace(name="spine")],
+                ),
+                "spine-01": SimpleNamespace(
+                    name="spine-01",
+                    hostname="192.168.1.1",
+                    platform="eos",
+                    groups=[SimpleNamespace(name="spine")],
+                ),
+            }
+        )
+    )
+    monkeypatch.setattr("server.InitNornir", lambda **_: new_fake)
+    report = server.reload_inventory()
+    assert "router-99" in report["current_hosts"]
+    assert "router-99" in report["added"]
+    assert "leaf-01" in report["removed"]
+    assert report["total"] == 2
+
+
+def test_reload_inventory_rebuilds_singleton() -> None:
+    server.reload_inventory()
+    before = server._nornir
+    server.reload_inventory()
+    after = server._nornir
+    assert before is not None
+    assert after is not None
+    assert before is not after

@@ -71,12 +71,13 @@ This writes the STDIO entry into `~/Library/Application Support/Claude/claude_de
 
 ## MCP Tools
 
-| Tool | Description |
-|---|---|
-| `list_inventory` | List all devices with hostname, platform, and groups |
-| `get_network_facts` | System facts: vendor, model, OS version, serial, uptime |
-| `get_network_interfaces` | Interface state + IP assignments |
-| `run_napalm_getter` | Generic: run any NAPALM getter by name |
+| Tool                     | Description                                                                 |
+| ------------------------ | --------------------------------------------------------------------------- |
+| `list_inventory`         | List all devices with hostname, platform, and groups                        |
+| `get_network_facts`      | System facts: vendor, model, OS version, serial, uptime                     |
+| `get_network_interfaces` | Interface state + IP assignments                                            |
+| `run_napalm_getter`      | Generic: run any NAPALM getter by name                                      |
+| `reload_inventory`       | Re-read `inventory/*.yaml` from disk; returns a diff of added/removed hosts |
 
 ### Common getters for `run_napalm_getter`
 
@@ -84,6 +85,18 @@ This writes the STDIO entry into `~/Library/Application Support/Claude/claude_de
 `environment`, `lldp_neighbors`, `lldp_neighbors_detail`,
 `mac_address_table`, `ntp_servers`, `ntp_stats`,
 `optics`, `route_to`, `snmp_information`, `users`, `vlans`
+
+### Refreshing the inventory
+
+The server caches the Nornir instance (and therefore the inventory) for the
+lifetime of the process. After editing `inventory/hosts.yaml`,
+`inventory/groups.yaml`, or `inventory/defaults.yaml`, call
+`reload_inventory` to discard the cache and re-read the YAML files. The
+tool returns a diff summary (`previous_hosts`, `current_hosts`, `added`,
+`removed`, `total`) so the caller can confirm the reload had the
+expected effect. `reload_inventory` also clears any failed-host state
+Nornir has tracked, so a previously hung device is retried on the next
+getter call.
 
 ---
 
@@ -122,8 +135,8 @@ services:
 
 ### Environment variables
 
-| Variable | Default | Description |
-|---|---|---|
+| Variable        | Default       | Description                    |
+| --------------- | ------------- | ------------------------------ |
 | `NORNIR_CONFIG` | `config.yaml` | Path to the Nornir config file |
 
 ### Changing transport
