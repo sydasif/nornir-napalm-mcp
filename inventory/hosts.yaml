@@ -1,0 +1,56 @@
+---
+# ------------------------------------------------------------
+# Hosts inventory — one entry per managed device.
+# Credentials fall through to groups.yaml → defaults.yaml.
+# ------------------------------------------------------------
+
+spine-01:
+  hostname: 192.168.1.1
+  platform: eos
+  groups:
+    - spine
+    - datacenter-a
+  data:
+    role: spine
+    site: dc-a
+
+spine-02:
+  hostname: 192.168.1.2
+  platform: eos
+  groups:
+    - spine
+    - datacenter-a
+  data:
+    role: spine
+    site: dc-a
+
+leaf-01:
+  hostname: 192.168.1.11
+  platform: eos
+  groups:
+    - leaf
+    - datacenter-a
+  data:
+    role: leaf
+    site: dc-a
+
+leaf-02:
+  hostname: 192.168.1.12
+  platform: eos
+  groups:
+    - leaf
+    - datacenter-a
+  data:
+    role: leaf
+    site: dc-a
+
+# Example of a different-platform device
+core-router-01:
+  hostname: 10.0.0.1
+  platform: junos
+  port: 22
+  groups:
+    - core
+  data:
+    role: core-router
+    site: dc-a
