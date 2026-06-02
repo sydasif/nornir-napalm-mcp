@@ -1,0 +1,68 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "nornir-napalm-mcp"
+version = "0.1.0"
+description = "FastMCP server exposing network device data via Nornir + NAPALM"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+
+dependencies = [
+    "fastmcp>=2.0",
+    "nornir>=3.4",
+    "nornir-napalm>=0.4",
+    "nornir-utils>=0.2",
+    "napalm>=5.0",
+]
+
+[project.optional-dependencies]
+# Install the drivers you actually need
+eos    = ["napalm[eos]"]
+junos  = ["napalm[junos]"]
+ios    = ["napalm[ios]"]
+all-drivers = ["napalm[eos,junos,ios]"]
+
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio",
+    "ruff",
+    "mypy",
+]
+
+[project.scripts]
+nornir-napalm-mcp = "server:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["."]
+
+# ---------------------------------------------------------------------------
+# Ruff linting
+# ---------------------------------------------------------------------------
+[tool.ruff]
+line-length = 99
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+
+# ---------------------------------------------------------------------------
+# Mypy
+# ---------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.10"
+strict = false
+ignore_missing_imports = true
+
+# ---------------------------------------------------------------------------
+# Pytest
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+pythonpath = ["."]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+]
