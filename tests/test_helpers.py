@@ -6,6 +6,8 @@ the `fake_nornir` fixture — no real devices or SSH sessions involved.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+
 import pytest
 
 import server
@@ -13,7 +15,7 @@ from tests.conftest import FakeGroup, FakeHost, FakeHosts, FakeInventory, FakeNo
 
 
 @pytest.fixture(autouse=True)
-def _reload_server(fake_nornir) -> None:
+def _reload_server(fake_nornir: dict[str, FakeHost]) -> Iterator[None]:
     """Reset server's cached Nornir singleton before each test.
 
     Args:
@@ -24,32 +26,12 @@ def _reload_server(fake_nornir) -> None:
     server._nornir = None
 
 
-def test_get_host_returns_known_host() -> None:
-    """Verify that a known device name returns the correct Host object."""
-    host = server._get_host("spine-01")
-    assert isinstance(host, FakeHost)
-    assert host.name == "spine-01"
-    assert host.platform == "eos"
-
-
-def test_get_host_raises_for_unknown_device() -> None:
-    """Verify that requesting a non-existent device raises a ValueError."""
-    with pytest.raises(ValueError, match="not found in inventory"):
-        server._get_host("does-not-exist")
-
-
-def test_resolve_config_defaults_to_module_relative() -> None:
+def test_resolve_config_defaults_to_module_relative(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify config resolution defaults to config.yaml relative to the server module."""
-    import os
-
-    old = os.environ.pop("NORNIR_CONFIG", None)
-    try:
-        path = server._resolve_config()
-        assert path.name == "config.yaml"
-        assert path.is_absolute()
-    finally:
-        if old is not None:
-            os.environ["NORNIR_CONFIG"] = old
+    monkeypatch.delenv("NORNIR_CONFIG", raising=False)
+    path = server._resolve_config()
+    assert path.name == "config.yaml"
+    assert path.is_absolute()
 
 
 def test_resolve_config_honors_env_var(tmp_path, monkeypatch) -> None:
@@ -80,16 +62,16 @@ def test_list_inventory_shape() -> None:
     """Verify the structure and content of the inventory list."""
     devices = server.nornir_list_inventory()
     assert isinstance(devices, list)
-    assert {d["name"] for d in devices} == {"spine-01", "leaf-01"}
+    assert {d.name for d in devices} == {"spine-01", "leaf-01"}
     sample = devices[0]
-    assert set(sample.keys()) == {"name", "hostname", "platform", "groups"}
-    assert isinstance(sample["groups"], list)
+    assert set(sample.model_dump()) == {"name", "hostname", "platform", "groups"}
+    assert isinstance(sample.groups, list)
 
 
 def test_list_inventory_sorted() -> None:
     """Verify that the inventory list is returned sorted by device name."""
     devices = server.nornir_list_inventory()
-    names = [d["name"] for d in devices]
+    names = [d.name for d in devices]
     assert names == sorted(names)
 
 
@@ -108,15 +90,22 @@ def test_run_getter_validates_device_first() -> None:
 def test_get_network_facts_returns_facts_dict() -> None:
     """Verify the get_network_facts tool returns the correct filtered data."""
     facts = server.nornir_get_facts("spine-01")
-    assert facts == {"ok": True}
+    assert facts.additional_facts == {"ok": True}
+    assert facts.model_dump() == {
+        "hostname": None,
+        "vendor": None,
+        "model": None,
+        "os_version": None,
+        "serial_number": None,
+        "additional_facts": {"ok": True},
+    }
 
 
 def test_get_network_interfaces_merges_keys() -> None:
     """Verify the get_network_interfaces tool returns the merged interface data."""
     out = server.nornir_get_interfaces("leaf-01")
-    assert set(out.keys()) == {"interfaces", "interfaces_ip"}
-    assert out["interfaces"] == {"ok": True}
-    assert out["interfaces_ip"] == {"ok": True}
+    assert out.interfaces == {"ok": True}
+    assert out.interfaces_ip == {"ok": True}
 
 
 def test_run_napalm_getter_rejects_invalid_name() -> None:
@@ -134,11 +123,11 @@ def test_run_napalm_getter_returns_payload() -> None:
 def test_reload_inventory_initial_summary() -> None:
     """Verify the inventory reload summary when starting from an empty state."""
     report = server.nornir_reload_inventory()
-    assert report["total"] == 2
-    assert set(report["current_hosts"]) == {"spine-01", "leaf-01"}
-    assert report["previous_hosts"] == []
-    assert sorted(report["added"]) == ["leaf-01", "spine-01"]
-    assert report["removed"] == []
+    assert report.total == 2
+    assert set(report.current_hosts) == {"spine-01", "leaf-01"}
+    assert report.previous_hosts == []
+    assert sorted(report.added) == ["leaf-01", "spine-01"]
+    assert report.removed == []
 
 
 def test_reload_inventory_detects_added_host(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -167,10 +156,10 @@ def test_reload_inventory_detects_added_host(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setattr("server.InitNornir", mock_init)
     report = server.nornir_reload_inventory()
 
-    assert "router-99" in report["current_hosts"]
-    assert "router-99" in report["added"]
-    assert "leaf-01" in report["removed"]
-    assert report["total"] == 2
+    assert "router-99" in report.current_hosts
+    assert "router-99" in report.added
+    assert "leaf-01" in report.removed
+    assert report.total == 2
 
 
 def test_reload_inventory_rebuilds_singleton() -> None:

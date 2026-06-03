@@ -3,6 +3,7 @@ and exercised without a real Nornir config or live network devices."""
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -41,7 +42,7 @@ class FakeHosts:
     def __contains__(self, name: str) -> bool:
         return name in self._hosts
 
-    def __iter__(self) -> Any:
+    def __iter__(self) -> Iterator[str]:
         return iter(self._hosts)
 
     def __len__(self) -> int:
@@ -53,6 +54,15 @@ class FakeInventory:
     """Stub for Nornir Inventory."""
 
     hosts: FakeHosts
+
+
+@dataclass
+class FakeTaskResult:
+    """Stub for Nornir TaskResult."""
+
+    result: dict[str, Any]
+    failed: bool = False
+    exception: Any = None
 
 
 @dataclass
@@ -72,15 +82,7 @@ class FakeNornir:
             return {}
 
         name = next(iter(hosts))
-
-        # Mock TaskResult
-        class TaskResult:
-            def __init__(self, result: dict[str, Any]):
-                self.failed = False
-                self.exception = None
-                self.result = result
-
-        return {name: [TaskResult({g: {"ok": True} for g in getters})]}
+        return {name: [FakeTaskResult({g: {"ok": True} for g in getters})]}
 
 
 def _make_host(name: str, hostname: str, platform: str, groups: list[str]) -> FakeHost:

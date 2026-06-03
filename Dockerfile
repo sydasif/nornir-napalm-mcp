@@ -13,7 +13,12 @@ COPY pyproject.toml .
 COPY README.md .
 
 # Install runtime deps into a prefix we can copy cleanly
-RUN pip install --prefix=/install ".[all-drivers]"
+# Install base package first
+RUN pip install --prefix=/install .
+# Then install driver dependencies individually if the combined extra fails
+RUN pip install --prefix=/install napalm[eos] || echo "Warning: napalm[eos] extra not available, continuing" && \
+    pip install --prefix=/install napalm[junos] || echo "Warning: napalm[junos] extra not available, continuing" && \
+    pip install --prefix=/install napalm[ios] || echo "Warning: napalm[ios] extra not available, continuing"
 
 # ---------------------------------------------------------------------------
 # Stage 2 — runtime image

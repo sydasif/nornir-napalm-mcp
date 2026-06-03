@@ -3,16 +3,18 @@ Nornir-NAPALM FastMCP Server
 Exposes network device data to AI assistants via NAPALM getters.
 """
 
+import argparse
 import logging
 import os
+from operator import attrgetter
 from pathlib import Path
 from typing import Any
 
 from fastmcp import FastMCP
 from nornir import InitNornir
 from nornir.core import Nornir
-from nornir.core.inventory import Host
 from nornir_napalm.plugins.tasks import napalm_get
+from pydantic import BaseModel, Field
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -119,29 +121,6 @@ def _get_nornir() -> Nornir:
 # ---------------------------------------------------------------------------
 
 
-def _get_host(device_name: str) -> Host:
-    """Return the Host object or raise a descriptive ValueError.
-
-    Args:
-        device_name: The name of the host to retrieve.
-
-    Returns:
-        The Nornir Host object.
-
-    Raises:
-        ValueError: If the device is not found in the inventory.
-    """
-    nr = _get_nornir()
-    host = nr.inventory.hosts.get(device_name)
-    if host is None:
-        available = ", ".join(sorted(nr.inventory.hosts)) or "(none)"
-        raise ValueError(
-            f"Device '{device_name}' not found in inventory. "
-            f"Available devices: {available}. Call nornir_list_inventory to see the current list."
-        )
-    return host
-
-
 def _run_getter(device_name: str, getters: list[str]) -> dict[str, Any]:
     """Filter Nornir to a single host and run napalm_get.
 
@@ -156,9 +135,14 @@ def _run_getter(device_name: str, getters: list[str]) -> dict[str, Any]:
         ValueError: For unknown devices.
         RuntimeError: For connection or task failures.
     """
-    _get_host(device_name)  # validate early with a friendly message
-
     nr = _get_nornir()
+    if device_name not in nr.inventory.hosts:
+        available = ", ".join(sorted(nr.inventory.hosts)) or "(none)"
+        raise ValueError(
+            f"Device '{device_name}' not found in inventory. "
+            f"Available devices: {available}. Call nornir_list_inventory to see the current list."
+        )
+
     nr_filtered = nr.filter(name=device_name)
     result = nr_filtered.run(task=napalm_get, getters=getters)
 
@@ -169,7 +153,7 @@ def _run_getter(device_name: str, getters: list[str]) -> dict[str, Any]:
     if task_result.failed:
         raise RuntimeError(f"NAPALM task failed for '{device_name}': {task_result.exception}")
 
-    return task_result.result  # dict keyed by getter name
+    return task_result.result  # dict keyed by getter name  # type: ignore[no-any-return]
 
 
 # ---------------------------------------------------------------------------
@@ -198,7 +182,7 @@ def nornir_list_inventory() -> list[InventoryDevice]:
                 groups=[g.name for g in host.groups],
             )
         )
-    return sorted(devices, key=lambda d: d.name)
+    return sorted(devices, key=attrgetter("name"))
 
 
 @mcp.tool()
@@ -222,12 +206,17 @@ def nornir_get_facts(device_name: str) -> NetworkFacts:
             "Check the device connectivity or try nornir_run_getter with a different getter."
         )
 
+    if not isinstance(facts_data, dict):
+        raise RuntimeError(
+            f"NAPALM 'facts' getter returned unexpected type {type(facts_data).__name__} "
+            f"for '{device_name}'. Expected a dict."
+        )
+
     standard_fields = {"hostname", "vendor", "model", "os_version", "serial_number"}
-    fact_dict = facts_data if isinstance(facts_data, dict) else {}
 
     return NetworkFacts(
-        **{k: v for k, v in fact_dict.items() if k in standard_fields},
-        additional_facts={k: v for k, v in fact_dict.items() if k not in standard_fields},
+        **{k: v for k, v in facts_data.items() if k in standard_fields},
+        additional_facts={k: v for k, v in facts_data.items() if k not in standard_fields},
     )
 
 
@@ -302,8 +291,9 @@ def nornir_reload_inventory() -> ReloadSummary:
 # Entry point
 # ---------------------------------------------------------------------------
 
-if __name__ == "__main__":
-    import argparse
+
+def main() -> None:
+    """Entry point for the nornir-napalm-mcp CLI."""
 
     parser = argparse.ArgumentParser(description="Nornir-NAPALM FastMCP Server")
     parser.add_argument(
@@ -316,9 +306,16 @@ if __name__ == "__main__":
     parser.add_argument("--port", type=int, default=8000, help="SSE bind port")
     args = parser.parse_args()
 
-    if args.transport == "sse":
-        log.info("Starting SSE server on %s:%d", args.host, args.port)
-        mcp.run(transport="sse", host=args.host, port=args.port)
-    else:
-        log.info("Starting STDIO server (Claude Desktop mode)")
-        mcp.run(transport="stdio")
+    match args.transport:
+        case "sse":
+            log.info("Starting SSE server on %s:%d", args.host, args.port)
+            mcp.run(transport="sse", host=args.host, port=args.port)
+        case "stdio":
+            log.info("Starting STDIO server (Claude Desktop mode)")
+            mcp.run(transport="stdio")
+        case _:  # pragma: no cover
+            pass
+
+
+if __name__ == "__main__":
+    main()
