@@ -75,21 +75,35 @@ class FakeNornir:
         host = self.inventory.hosts.get(name)
         return FakeNornir(FakeInventory(FakeHosts({name: host}) if host else FakeHosts({})))
 
-    def run(self, task: Any, getters: list[str]) -> dict[str, list[Any]]:
+    def run(self, task: Any, **kwargs: Any) -> dict[str, list[Any]]:
         # Get the first host name from the filtered inventory
         hosts = self.inventory.hosts._hosts
         if not hosts:
             return {}
 
         name = next(iter(hosts))
-        # Return distinct payloads per getter for better test coverage
-        payloads = {
-            "facts": {"hostname": "test-host", "vendor": "Arista", "model": "7280R"},
-            "interfaces": {"Ethernet1": {"state": "up", "speed": "1000"}},
-            "interfaces_ip": {"Ethernet1": {"ipv4": {"10.0.0.1/24": {}}}},
-        }
-        result = {g: payloads.get(g, {"ok": True}) for g in getters}
-        return {name: [FakeTaskResult(result)]}
+
+        # Dispatch based on which kwargs are present
+        if "getters" in kwargs:
+            getters = kwargs["getters"]
+            payloads = {
+                "facts": {"hostname": "test-host", "vendor": "Arista", "model": "7280R"},
+                "interfaces": {"Ethernet1": {"state": "up", "speed": "1000"}},
+                "interfaces_ip": {"Ethernet1": {"ipv4": {"10.0.0.1/24": {}}}},
+                "config": {
+                    "running": "! running-config\nhostname test-host\n",
+                    "startup": "! startup-config\nhostname test-host\n",
+                },
+            }
+            result = {g: payloads.get(g, {"ok": True}) for g in getters}
+            return {name: [FakeTaskResult(result)]}
+
+        if "commands" in kwargs:
+            commands = kwargs["commands"]
+            result = {cmd: f"Output for: {cmd}" for cmd in commands}
+            return {name: [FakeTaskResult(result)]}
+
+        return {}
 
 
 def _make_host(name: str, hostname: str, platform: str, groups: list[str]) -> FakeHost:

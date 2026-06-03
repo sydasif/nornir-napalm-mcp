@@ -175,3 +175,116 @@ def test_reload_inventory_rebuilds_singleton() -> None:
     assert before is not None
     assert after is not None
     assert before is not after
+
+
+# ---------------------------------------------------------------------------
+# nornir_get_config
+# ---------------------------------------------------------------------------
+
+
+def test_get_config_returns_both() -> None:
+    """Verify get_config returns both running and startup by default."""
+    cfg = server.nornir_get_config("spine-01")
+    assert cfg.running is not None
+    assert cfg.startup is not None
+    assert "running-config" in cfg.running
+    assert "startup-config" in cfg.startup
+
+
+def test_get_config_running_only() -> None:
+    """Verify get_config with config_type='running' returns only running."""
+    cfg = server.nornir_get_config("spine-01", config_type="running")
+    assert cfg.running is not None
+    assert cfg.startup is None
+
+
+def test_get_config_startup_only() -> None:
+    """Verify get_config with config_type='startup' returns only startup."""
+    cfg = server.nornir_get_config("spine-01", config_type="startup")
+    assert cfg.running is None
+    assert cfg.startup is not None
+
+
+def test_get_config_rejects_invalid_type() -> None:
+    """Verify get_config raises ValueError for invalid config_type."""
+    with pytest.raises(ValueError, match="Invalid config_type"):
+        server.nornir_get_config("spine-01", config_type="invalid")
+
+
+def test_get_config_unknown_device() -> None:
+    """Verify get_config raises ValueError for unknown device."""
+    with pytest.raises(ValueError, match="not found in inventory"):
+        server.nornir_get_config("nope")
+
+
+# ---------------------------------------------------------------------------
+# nornir_run_cli
+# ---------------------------------------------------------------------------
+
+
+def test_run_cli_returns_output() -> None:
+    """Verify run_cli returns command-to-output mapping."""
+    out = server.nornir_run_cli("spine-01", ["show version"])
+    assert "show version" in out
+    assert "Output for: show version" == out["show version"]
+
+
+def test_run_cli_multiple_commands() -> None:
+    """Verify run_cli handles multiple commands."""
+    out = server.nornir_run_cli("spine-01", ["show version", "show ip route"])
+    assert len(out) == 2
+    assert "show version" in out
+    assert "show ip route" in out
+
+
+def test_run_cli_rejects_config_commands() -> None:
+    """Verify run_cli rejects non-show commands."""
+    with pytest.raises(ValueError, match="not a read-only show command"):
+        server.nornir_run_cli("spine-01", ["configure terminal"])
+
+
+def test_run_cli_rejects_write_commands() -> None:
+    """Verify run_cli rejects write/save commands."""
+    with pytest.raises(ValueError, match="not a read-only show command"):
+        server.nornir_run_cli("spine-01", ["write memory"])
+
+
+def test_run_cli_rejects_empty_commands() -> None:
+    """Verify run_cli raises ValueError for empty command list."""
+    with pytest.raises(ValueError, match="No commands provided"):
+        server.nornir_run_cli("spine-01", [])
+
+
+def test_run_cli_unknown_device() -> None:
+    """Verify run_cli raises ValueError for unknown device."""
+    with pytest.raises(ValueError, match="not found in inventory"):
+        server.nornir_run_cli("nope", ["show version"])
+
+
+# ---------------------------------------------------------------------------
+# nornir_list_getters
+# ---------------------------------------------------------------------------
+
+
+def test_list_getters_returns_platforms() -> None:
+    """Verify list_getters returns GetterInfo for each platform."""
+    results = server.nornir_list_getters()
+    assert isinstance(results, list)
+    platforms = {r.platform for r in results}
+    assert "eos" in platforms
+
+
+def test_list_getters_has_getters() -> None:
+    """Verify the getter lists are non-empty for known platforms."""
+    results = server.nornir_list_getters()
+    for info in results:
+        if info.platform == "eos":
+            assert len(info.getters) > 0
+            assert "facts" in info.getters
+
+
+def test_list_getters_sorted_by_platform() -> None:
+    """Verify results are sorted by platform name."""
+    results = server.nornir_list_getters()
+    names = [r.platform for r in results]
+    assert names == sorted(names)
