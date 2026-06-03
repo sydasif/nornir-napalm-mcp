@@ -6,10 +6,12 @@ Exposes network device data to AI assistants via NAPALM getters.
 import logging
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict
 
 from fastmcp import FastMCP
 from nornir import InitNornir
+from nornir.core import Nornir
+from nornir.core.inventory import Host
 from nornir_napalm.plugins.tasks import napalm_get
 
 # ---------------------------------------------------------------------------
@@ -20,6 +22,20 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 log = logging.getLogger("nornir-napalm-mcp")
+
+# ---------------------------------------------------------------------------
+# Types
+# ---------------------------------------------------------------------------
+
+
+class InventoryDevice(TypedDict):
+    """Structured representation of a network device in the inventory."""
+
+    name: str
+    hostname: str
+    platform: str
+    groups: list[str]
+
 
 # ---------------------------------------------------------------------------
 # FastMCP + Nornir initialisation
@@ -33,35 +49,39 @@ mcp = FastMCP(
     ),
 )
 
-_nornir: Any | None = None
+_nornir: Nornir | None = None
 
 
-def _resolve_config() -> str:
+def _resolve_config() -> Path:
     """Resolve the Nornir config file path.
 
     Honors the NORNIR_CONFIG env var. Relative paths are resolved against
-    the directory containing this server module, so the server runs
-    correctly regardless of the current working directory.
+    the directory containing this server module.
+
+    Returns:
+        The absolute path to the Nornir configuration file.
     """
     raw = os.environ.get("NORNIR_CONFIG", "config.yaml")
     path = Path(raw)
     if not path.is_absolute():
         path = Path(__file__).resolve().parent / path
-    return str(path)
+    return path.resolve()
 
 
-def _get_nornir() -> Any:
+def _get_nornir() -> Nornir:
     """Return the cached Nornir instance, initialising on first call.
 
     Lazy initialisation means a broken inventory does not prevent the
-    MCP server from starting and exposing its tool catalogue. Errors
-    surface on the first tool call, where they can be handled cleanly.
+    MCP server from starting and exposing its tool catalogue.
+
+    Returns:
+        The initialized Nornir instance.
     """
     global _nornir
     if _nornir is None:
         config_path = _resolve_config()
         log.info("Initialising Nornir from %s", config_path)
-        _nornir = InitNornir(config_file=config_path)
+        _nornir = InitNornir(config_file=str(config_path))
         log.info("Nornir initialised with %d hosts.", len(_nornir.inventory.hosts))
     return _nornir
 
@@ -71,8 +91,18 @@ def _get_nornir() -> Any:
 # ---------------------------------------------------------------------------
 
 
-def _get_host(device_name: str) -> Any:
-    """Return the Host object or raise a descriptive ValueError."""
+def _get_host(device_name: str) -> Host:
+    """Return the Host object or raise a descriptive ValueError.
+
+    Args:
+        device_name: The name of the host to retrieve.
+
+    Returns:
+        The Nornir Host object.
+
+    Raises:
+        ValueError: If the device is not found in the inventory.
+    """
     nr = _get_nornir()
     host = nr.inventory.hosts.get(device_name)
     if host is None:
@@ -84,11 +114,18 @@ def _get_host(device_name: str) -> Any:
 
 
 def _run_getter(device_name: str, getters: list[str]) -> dict[str, Any]:
-    """
-    Filter Nornir to a single host and run napalm_get.
+    """Filter Nornir to a single host and run napalm_get.
 
-    Returns the raw getter dict from the task result.
-    Raises ValueError for unknown devices, RuntimeError for connection/task failures.
+    Args:
+        device_name: Exact host name as defined in hosts.yaml.
+        getters: List of NAPALM getters to execute.
+
+    Returns:
+        The raw getter dict from the task result.
+
+    Raises:
+        ValueError: For unknown devices.
+        RuntimeError: For connection or task failures.
     """
     _get_host(device_name)  # validate early with a friendly message
 
@@ -96,8 +133,9 @@ def _run_getter(device_name: str, getters: list[str]) -> dict[str, Any]:
     nr_filtered = nr.filter(name=device_name)
     result = nr_filtered.run(task=napalm_get, getters=getters)
 
-    host_result = result[device_name]  # MultiResult (list of TaskResult)
-    task_result = host_result[0]  # first (and only) TaskResult
+    # Nornir MultiResult mapping
+    host_result = result[device_name]
+    task_result = host_result[0]
 
     if task_result.failed:
         raise RuntimeError(f"NAPALM task failed for '{device_name}': {task_result.exception}")
@@ -111,16 +149,17 @@ def _run_getter(device_name: str, getters: list[str]) -> dict[str, Any]:
 
 
 @mcp.tool()
-def list_inventory() -> list[dict[str, Any]]:
-    """
-    List all network devices loaded from the YAML inventory.
+def list_inventory() -> list[InventoryDevice]:
+    """List all network devices loaded from the YAML inventory.
 
-    Returns hostname, platform, and group membership for each device.
-    Always call this first to discover what devices are available before
-    running any getter tool.
+    Returns a list of devices with their hostname, platform, and group membership.
+    Always call this first to discover what devices are available.
+
+    Returns:
+        A sorted list of devices.
     """
     nr = _get_nornir()
-    devices = []
+    devices: list[InventoryDevice] = []
     for host in nr.inventory.hosts.values():
         devices.append(
             {
@@ -135,14 +174,16 @@ def list_inventory() -> list[dict[str, Any]]:
 
 @mcp.tool()
 def get_network_facts(device_name: str) -> dict[str, Any]:
-    """
-    Fetch system facts for a specific device.
-
-    Returns: hostname, vendor, model, os_version, serial_number, uptime,
-    and interface list.
+    """Fetch system facts for a specific device.
 
     Args:
         device_name: Exact host name as defined in hosts.yaml (case-sensitive).
+
+    Returns:
+        A dictionary containing hostname, vendor, model, os_version, etc.
+
+    Raises:
+        RuntimeError: If the 'facts' getter returns no data.
     """
     data = _run_getter(device_name, ["facts"])
     facts = data.get("facts")
@@ -153,15 +194,13 @@ def get_network_facts(device_name: str) -> dict[str, Any]:
 
 @mcp.tool()
 def get_network_interfaces(device_name: str) -> dict[str, Any]:
-    """
-    Fetch interface details and IP address assignments for a specific device.
-
-    Returns a merged dict with two keys:
-      - "interfaces":    physical state, speed, MTU, MAC per interface.
-      - "interfaces_ip": IP/prefix assignments per interface.
+    """Fetch interface details and IP address assignments for a specific device.
 
     Args:
         device_name: Exact host name as defined in hosts.yaml (case-sensitive).
+
+    Returns:
+        A dict with "interfaces" and "interfaces_ip" keys.
     """
     data = _run_getter(device_name, ["interfaces", "interfaces_ip"])
     return {
@@ -172,18 +211,19 @@ def get_network_interfaces(device_name: str) -> dict[str, Any]:
 
 @mcp.tool()
 def run_napalm_getter(device_name: str, getter: str) -> Any:
-    """
-    Run any supported NAPALM getter on a specific device.
+    """Run any supported NAPALM getter on a specific device.
 
-    Useful for getters not covered by dedicated tools. Common getters:
-      arp_table, bgp_neighbors, bgp_neighbors_detail, bgp_config,
-      environment, lldp_neighbors, lldp_neighbors_detail,
-      mac_address_table, ntp_servers, ntp_stats,
-      optics, route_to, snmp_information, users, vlans.
+    Useful for getters not covered by dedicated tools (e.g., 'arp_table', 'vlans').
 
     Args:
         device_name: Exact host name as defined in hosts.yaml (case-sensitive).
-        getter:      NAPALM getter name (without the "get_" prefix).
+        getter: NAPALM getter name (without the "get_" prefix).
+
+    Returns:
+        The result of the NAPALM getter.
+
+    Raises:
+        ValueError: If the getter name contains invalid characters.
     """
     if not getter.replace("_", "").isalpha():
         raise ValueError(
@@ -197,17 +237,13 @@ def run_napalm_getter(device_name: str, getter: str) -> Any:
 
 @mcp.tool()
 def reload_inventory() -> dict[str, Any]:
-    """
-    Reload the network inventory from disk.
+    """Reload the network inventory from disk.
 
-    Discards the in-memory inventory cache and re-reads
-    inventory/hosts.yaml, groups.yaml, and defaults.yaml. Use after
-    editing the inventory files to pick up new or removed devices,
-    or after a device failure has caused Nornir to mark a host as
-    failed and skip it on subsequent calls.
+    Discards the in-memory inventory cache and re-reads YAML files.
+    Use after editing the inventory files.
 
-    Returns a diff-style summary (previous/current/added/removed/total)
-    so the caller can verify the reload had the expected effect.
+    Returns:
+        A summary of the reload containing added, removed, and total hosts.
     """
     global _nornir
     previous = sorted(_nornir.inventory.hosts) if _nornir is not None else []

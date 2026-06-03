@@ -3,22 +3,39 @@ and exercised without a real Nornir config or live network devices."""
 
 from __future__ import annotations
 
-from types import SimpleNamespace
+from dataclasses import dataclass, field
 from typing import Any
 
 import pytest
 
 
-class _FakeHosts:
+@dataclass
+class FakeGroup:
+    """Stub for Nornir Group."""
+
+    name: str
+
+
+@dataclass
+class FakeHost:
+    """Stub for Nornir Host."""
+
+    name: str
+    hostname: str
+    platform: str
+    groups: list[FakeGroup] = field(default_factory=list)
+
+
+@dataclass
+class FakeHosts:
     """Minimal mapping implementing the inventory.hosts surface area."""
 
-    def __init__(self, hosts: dict[str, SimpleNamespace]) -> None:
-        self._hosts = hosts
+    _hosts: dict[str, FakeHost]
 
-    def values(self) -> list[SimpleNamespace]:
+    def values(self) -> list[FakeHost]:
         return list(self._hosts.values())
 
-    def get(self, name: str) -> SimpleNamespace | None:
+    def get(self, name: str) -> FakeHost | None:
         return self._hosts.get(name)
 
     def __contains__(self, name: str) -> bool:
@@ -31,48 +48,60 @@ class _FakeHosts:
         return len(self._hosts)
 
 
-class _FakeInventory:
-    def __init__(self, hosts: dict[str, SimpleNamespace]) -> None:
-        self.hosts = _FakeHosts(hosts)
+@dataclass
+class FakeInventory:
+    """Stub for Nornir Inventory."""
+
+    hosts: FakeHosts
 
 
-class _FakeNornir:
-    def __init__(self, hosts: dict[str, SimpleNamespace]) -> None:
-        self.inventory = _FakeInventory(hosts)
+@dataclass
+class FakeNornir:
+    """Stub for Nornir instance."""
 
-    def filter(self, name: str) -> _FakeNornir:
-        return _FakeNornir(
-            {name: self.inventory.hosts.get(name)}  # type: ignore[arg-type]
-        )
+    inventory: FakeInventory
 
-    def run(self, task: Any, getters: list[str]) -> dict[str, list[SimpleNamespace]]:
-        name = next(iter(self.inventory.hosts._hosts))
-        return {
-            name: [
-                SimpleNamespace(
-                    failed=False,
-                    exception=None,
-                    result={g: {"ok": True} for g in getters},
-                )
-            ]
-        }
+    def filter(self, name: str) -> FakeNornir:
+        host = self.inventory.hosts.get(name)
+        return FakeNornir(FakeInventory(FakeHosts({name: host}) if host else FakeHosts({})))
+
+    def run(self, task: Any, getters: list[str]) -> dict[str, list[Any]]:
+        # Get the first host name from the filtered inventory
+        hosts = self.inventory.hosts._hosts
+        if not hosts:
+            return {}
+
+        name = next(iter(hosts))
+
+        # Mock TaskResult
+        class TaskResult:
+            def __init__(self, result: dict[str, Any]):
+                self.failed = False
+                self.exception = None
+                self.result = result
+
+        return {name: [TaskResult({g: {"ok": True} for g in getters})]}
 
 
-def _make_host(name: str, hostname: str, platform: str, groups: list[str]) -> SimpleNamespace:
-    return SimpleNamespace(
+def _make_host(name: str, hostname: str, platform: str, groups: list[str]) -> FakeHost:
+    return FakeHost(
         name=name,
         hostname=hostname,
         platform=platform,
-        groups=[SimpleNamespace(name=g) for g in groups],
+        groups=[FakeGroup(name=g) for g in groups],
     )
 
 
 @pytest.fixture
-def fake_nornir(monkeypatch: pytest.MonkeyPatch) -> dict[str, SimpleNamespace]:
+def fake_nornir(monkeypatch: pytest.MonkeyPatch) -> dict[str, FakeHost]:
     """Patch server.InitNornir to return a deterministic fake inventory."""
-    hosts = {
+    hosts_data = {
         "spine-01": _make_host("spine-01", "192.168.1.1", "eos", ["spine", "datacenter-a"]),
         "leaf-01": _make_host("leaf-01", "192.168.1.11", "eos", ["leaf", "datacenter-a"]),
     }
-    monkeypatch.setattr("server.InitNornir", lambda **_: _FakeNornir(hosts))
-    return hosts
+
+    def mock_init(**_) -> FakeNornir:
+        return FakeNornir(FakeInventory(FakeHosts(hosts_data)))
+
+    monkeypatch.setattr("server.InitNornir", mock_init)
+    return hosts_data
