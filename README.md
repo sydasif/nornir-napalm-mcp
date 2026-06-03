@@ -37,14 +37,11 @@ MCP Client (Claude Desktop / Claude.ai)
 # Clone / copy this project
 cd nornir-napalm-mcp
 
-# Create a virtual environment
-python -m venv .venv && source .venv/bin/activate
-
-# Install with the drivers you need
-pip install ".[eos]"         # Arista EOS
-pip install ".[junos]"       # Juniper JunOS
-pip install ".[ios]"         # Cisco IOS/IOS-XE
-pip install ".[all-drivers]" # All of the above
+# Install with the drivers you need using uv
+uv sync --extra eos         # Arista EOS
+uv sync --extra junos       # Juniper JunOS
+uv sync --extra ios         # Cisco IOS/IOS-XE
+uv sync --extra all-drivers # All of the above
 ```
 
 ### 2. Configure your inventory
@@ -71,13 +68,13 @@ This writes the STDIO entry into `~/Library/Application Support/Claude/claude_de
 
 ## MCP Tools
 
-| Tool                     | Description                                                                 |
-| ------------------------ | --------------------------------------------------------------------------- |
-| `list_inventory`         | List all devices with hostname, platform, and groups                        |
-| `get_network_facts`      | System facts: vendor, model, OS version, serial, uptime                     |
-| `get_network_interfaces` | Interface state + IP assignments                                            |
-| `run_napalm_getter`      | Generic: run any NAPALM getter by name                                      |
-| `reload_inventory`       | Re-read `inventory/*.yaml` from disk; returns a diff of added/removed hosts |
+| Tool                      | Description                                                                 |
+| ------------------------- | --------------------------------------------------------------------------- |
+| `nornir_list_inventory`   | List all devices with hostname, platform, and groups                        |
+| `nornir_get_facts`        | System facts: vendor, model, OS version, serial, uptime                     |
+| `nornir_get_interfaces`   | Interface state + IP assignments                                            |
+| `nornir_run_getter`       | Generic: run any NAPALM getter by name                                      |
+| `nornir_reload_inventory` | Re-read `inventory/*.yaml` from disk; returns a diff of added/removed hosts |
 
 ### Common getters for `run_napalm_getter`
 
@@ -91,7 +88,7 @@ This writes the STDIO entry into `~/Library/Application Support/Claude/claude_de
 The server caches the Nornir instance (and therefore the inventory) for the
 lifetime of the process. After editing `inventory/hosts.yaml`,
 `inventory/groups.yaml`, or `inventory/defaults.yaml`, call
-`reload_inventory` to discard the cache and re-read the YAML files. The
+`nornir_reload_inventory` to discard the cache and re-read the YAML files. The
 tool returns a diff summary (`previous_hosts`, `current_hosts`, `added`,
 `removed`, `total`) so the caller can confirm the reload had the
 expected effect. `reload_inventory` also clears any failed-host state
