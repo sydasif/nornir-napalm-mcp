@@ -1,24 +1,19 @@
 # ---------------------------------------------------------------------------
 # Stage 1 — dependency builder
 # ---------------------------------------------------------------------------
+FROM ghcr.io/astral-sh/uv:0.7.4 AS uv
 FROM python:3.12-slim AS builder
 
 WORKDIR /build
 
-# Install build tools
-RUN pip install --upgrade pip hatchling
+# Install uv from the official image
+COPY --from=uv /usr/local/bin/uv /usr/local/bin/uv
 
 # Copy dependency files first for layer caching
-COPY pyproject.toml .
-COPY README.md .
+COPY pyproject.toml uv.lock README.md ./
 
-# Install runtime deps into a prefix we can copy cleanly
-# Install base package first
-RUN pip install --prefix=/install .
-# Then install driver dependencies individually if the combined extra fails
-RUN pip install --prefix=/install napalm[eos] || echo "Warning: napalm[eos] extra not available, continuing" && \
-    pip install --prefix=/install napalm[junos] || echo "Warning: napalm[junos] extra not available, continuing" && \
-    pip install --prefix=/install napalm[ios] || echo "Warning: napalm[ios] extra not available, continuing"
+# Install production dependencies
+RUN uv sync --production --locked --no-dev
 
 # ---------------------------------------------------------------------------
 # Stage 2 — runtime image
@@ -34,7 +29,7 @@ RUN useradd --create-home --shell /bin/bash mcp
 WORKDIR /app
 
 # Copy installed packages from builder
-COPY --from=builder /install /usr/local
+COPY --from=builder /build/.venv /usr/local
 
 # Copy application code
 COPY server.py config.yaml ./

@@ -8,7 +8,7 @@ import logging
 import os
 from operator import attrgetter
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from fastmcp import FastMCP
 from nornir import InitNornir
@@ -153,7 +153,7 @@ def _run_getter(device_name: str, getters: list[str]) -> dict[str, Any]:
     if task_result.failed:
         raise RuntimeError(f"NAPALM task failed for '{device_name}': {task_result.exception}")
 
-    return task_result.result  # dict keyed by getter name  # type: ignore[no-any-return]
+    return cast(dict[str, Any], task_result.result)
 
 
 # ---------------------------------------------------------------------------

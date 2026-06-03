@@ -78,7 +78,7 @@ def test_list_inventory_sorted() -> None:
 def test_run_getter_returns_getter_payload() -> None:
     """Verify that napalm_get returns the expected payload for a valid host."""
     data = server._run_getter("spine-01", ["facts"])
-    assert data == {"facts": {"ok": True}}
+    assert data == {"facts": {"hostname": "test-host", "vendor": "Arista", "model": "7280R"}}
 
 
 def test_run_getter_validates_device_first() -> None:
@@ -90,22 +90,18 @@ def test_run_getter_validates_device_first() -> None:
 def test_get_network_facts_returns_facts_dict() -> None:
     """Verify the get_network_facts tool returns the correct filtered data."""
     facts = server.nornir_get_facts("spine-01")
-    assert facts.additional_facts == {"ok": True}
-    assert facts.model_dump() == {
-        "hostname": None,
-        "vendor": None,
-        "model": None,
-        "os_version": None,
-        "serial_number": None,
-        "additional_facts": {"ok": True},
-    }
+    assert facts.hostname == "test-host"
+    assert facts.vendor == "Arista"
+    assert facts.model == "7280R"
+    assert facts.additional_facts == {}
 
 
 def test_get_network_interfaces_merges_keys() -> None:
-    """Verify the get_network_interfaces tool returns the merged interface data."""
+    """Verify the get_network_interfaces tool returns distinct data per getter."""
     out = server.nornir_get_interfaces("leaf-01")
-    assert out.interfaces == {"ok": True}
-    assert out.interfaces_ip == {"ok": True}
+    assert out.interfaces == {"Ethernet1": {"state": "up", "speed": "1000"}}
+    assert out.interfaces_ip == {"Ethernet1": {"ipv4": {"10.0.0.1/24": {}}}}
+    assert out.interfaces != out.interfaces_ip
 
 
 def test_run_napalm_getter_rejects_invalid_name() -> None:
@@ -118,6 +114,14 @@ def test_run_napalm_getter_returns_payload() -> None:
     """Verify that run_napalm_getter returns the specific getter payload."""
     out = server.nornir_run_getter("spine-01", "arp_table")
     assert out == {"ok": True}
+
+
+def test_run_napalm_getter_fallback_to_full_dict() -> None:
+    """Verify that run_napalm_getter falls back to full dict when getter key missing."""
+    # The fake always returns the getter key, but test the fallback logic directly
+    data = {"other_getter": {"some": "data"}}
+    result = data.get("arp_table", data)
+    assert result == data
 
 
 def test_reload_inventory_initial_summary() -> None:

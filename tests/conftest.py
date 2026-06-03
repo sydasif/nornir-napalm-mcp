@@ -82,7 +82,14 @@ class FakeNornir:
             return {}
 
         name = next(iter(hosts))
-        return {name: [FakeTaskResult({g: {"ok": True} for g in getters})]}
+        # Return distinct payloads per getter for better test coverage
+        payloads = {
+            "facts": {"hostname": "test-host", "vendor": "Arista", "model": "7280R"},
+            "interfaces": {"Ethernet1": {"state": "up", "speed": "1000"}},
+            "interfaces_ip": {"Ethernet1": {"ipv4": {"10.0.0.1/24": {}}}},
+        }
+        result = {g: payloads.get(g, {"ok": True}) for g in getters}
+        return {name: [FakeTaskResult(result)]}
 
 
 def _make_host(name: str, hostname: str, platform: str, groups: list[str]) -> FakeHost:
