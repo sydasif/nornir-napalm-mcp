@@ -6,7 +6,7 @@ Exposes network device data to AI assistants via NAPALM getters.
 import logging
 import os
 from pathlib import Path
-from typing import Any, TypedDict
+from typing import Any
 
 from fastmcp import FastMCP
 from nornir import InitNornir
@@ -28,13 +28,41 @@ log = logging.getLogger("nornir-napalm-mcp")
 # ---------------------------------------------------------------------------
 
 
-class InventoryDevice(TypedDict):
+class InventoryDevice(BaseModel):
     """Structured representation of a network device in the inventory."""
 
     name: str
     hostname: str
     platform: str
     groups: list[str]
+
+
+class NetworkFacts(BaseModel):
+    """System facts for a network device."""
+
+    hostname: str | None = None
+    vendor: str | None = None
+    model: str | None = None
+    os_version: str | None = None
+    serial_number: str | None = None
+    additional_facts: dict[str, Any] = Field(default_factory=dict)
+
+
+class NetworkInterfaces(BaseModel):
+    """Interface and IP address data for a network device."""
+
+    interfaces: dict[str, Any] = Field(default_factory=dict)
+    interfaces_ip: dict[str, Any] = Field(default_factory=dict)
+
+
+class ReloadSummary(BaseModel):
+    """Summary of inventory reload changes."""
+
+    previous_hosts: list[str]
+    current_hosts: list[str]
+    added: list[str]
+    removed: list[str]
+    total: int
 
 
 # ---------------------------------------------------------------------------
@@ -44,7 +72,7 @@ mcp = FastMCP(
     name="Nornir-NAPALM Server",
     instructions=(
         "Query live network device state via NAPALM getters. "
-        "Call list_inventory first to discover available devices, "
+        "Call nornir_list_inventory first to discover available devices, "
         "then use the targeted getter tools. All operations are read-only."
     ),
 )
@@ -108,7 +136,8 @@ def _get_host(device_name: str) -> Host:
     if host is None:
         available = ", ".join(sorted(nr.inventory.hosts)) or "(none)"
         raise ValueError(
-            f"Device '{device_name}' not found in inventory. Available devices: {available}"
+            f"Device '{device_name}' not found in inventory. "
+            f"Available devices: {available}. Call nornir_list_inventory to see the current list."
         )
     return host
 
@@ -149,7 +178,7 @@ def _run_getter(device_name: str, getters: list[str]) -> dict[str, Any]:
 
 
 @mcp.tool()
-def list_inventory() -> list[InventoryDevice]:
+def nornir_list_inventory() -> list[InventoryDevice]:
     """List all network devices loaded from the YAML inventory.
 
     Returns a list of devices with their hostname, platform, and group membership.
@@ -162,55 +191,65 @@ def list_inventory() -> list[InventoryDevice]:
     devices: list[InventoryDevice] = []
     for host in nr.inventory.hosts.values():
         devices.append(
-            {
-                "name": host.name,
-                "hostname": str(host.hostname),
-                "platform": str(host.platform),
-                "groups": [g.name for g in host.groups],
-            }
+            InventoryDevice(
+                name=host.name,
+                hostname=str(host.hostname),
+                platform=str(host.platform),
+                groups=[g.name for g in host.groups],
+            )
         )
-    return sorted(devices, key=lambda d: d["name"])
+    return sorted(devices, key=lambda d: d.name)
 
 
 @mcp.tool()
-def get_network_facts(device_name: str) -> dict[str, Any]:
+def nornir_get_facts(device_name: str) -> NetworkFacts:
     """Fetch system facts for a specific device.
 
     Args:
         device_name: Exact host name as defined in hosts.yaml (case-sensitive).
 
     Returns:
-        A dictionary containing hostname, vendor, model, os_version, etc.
+        A structured NetworkFacts object containing hostname, vendor, model, etc.
 
     Raises:
         RuntimeError: If the 'facts' getter returns no data.
     """
     data = _run_getter(device_name, ["facts"])
-    facts = data.get("facts")
-    if facts is None:
-        raise RuntimeError(f"NAPALM 'facts' getter returned no data for '{device_name}'.")
-    return facts
+    facts_data = data.get("facts")
+    if facts_data is None:
+        raise RuntimeError(
+            f"NAPALM 'facts' getter returned no data for '{device_name}'. "
+            "Check the device connectivity or try nornir_run_getter with a different getter."
+        )
+
+    standard_fields = {"hostname", "vendor", "model", "os_version", "serial_number"}
+    fact_dict = facts_data if isinstance(facts_data, dict) else {}
+
+    return NetworkFacts(
+        **{k: v for k, v in fact_dict.items() if k in standard_fields},
+        additional_facts={k: v for k, v in fact_dict.items() if k not in standard_fields},
+    )
 
 
 @mcp.tool()
-def get_network_interfaces(device_name: str) -> dict[str, Any]:
+def nornir_get_interfaces(device_name: str) -> NetworkInterfaces:
     """Fetch interface details and IP address assignments for a specific device.
 
     Args:
         device_name: Exact host name as defined in hosts.yaml (case-sensitive).
 
     Returns:
-        A dict with "interfaces" and "interfaces_ip" keys.
+        A structured NetworkInterfaces object.
     """
     data = _run_getter(device_name, ["interfaces", "interfaces_ip"])
-    return {
-        "interfaces": data.get("interfaces", {}),
-        "interfaces_ip": data.get("interfaces_ip", {}),
-    }
+    return NetworkInterfaces(
+        interfaces=data.get("interfaces", {}),
+        interfaces_ip=data.get("interfaces_ip", {}),
+    )
 
 
 @mcp.tool()
-def run_napalm_getter(device_name: str, getter: str) -> Any:
+def nornir_run_getter(device_name: str, getter: str) -> Any:
     """Run any supported NAPALM getter on a specific device.
 
     Useful for getters not covered by dedicated tools (e.g., 'arp_table', 'vlans').
@@ -236,27 +275,27 @@ def run_napalm_getter(device_name: str, getter: str) -> Any:
 
 
 @mcp.tool()
-def reload_inventory() -> dict[str, Any]:
+def nornir_reload_inventory() -> ReloadSummary:
     """Reload the network inventory from disk.
 
     Discards the in-memory inventory cache and re-reads YAML files.
     Use after editing the inventory files.
 
     Returns:
-        A summary of the reload containing added, removed, and total hosts.
+        A structured ReloadSummary containing added, removed, and total hosts.
     """
     global _nornir
     previous = sorted(_nornir.inventory.hosts) if _nornir is not None else []
     _nornir = None
     rebuilt = _get_nornir()
     current = sorted(rebuilt.inventory.hosts)
-    return {
-        "previous_hosts": previous,
-        "current_hosts": current,
-        "added": sorted(set(current) - set(previous)),
-        "removed": sorted(set(previous) - set(current)),
-        "total": len(current),
-    }
+    return ReloadSummary(
+        previous_hosts=previous,
+        current_hosts=current,
+        added=sorted(set(current) - set(previous)),
+        removed=sorted(set(previous) - set(current)),
+        total=len(current),
+    )
 
 
 # ---------------------------------------------------------------------------

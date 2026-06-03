@@ -78,7 +78,7 @@ def test_get_nornir_caches_singleton() -> None:
 
 def test_list_inventory_shape() -> None:
     """Verify the structure and content of the inventory list."""
-    devices = server.list_inventory()
+    devices = server.nornir_list_inventory()
     assert isinstance(devices, list)
     assert {d["name"] for d in devices} == {"spine-01", "leaf-01"}
     sample = devices[0]
@@ -88,7 +88,7 @@ def test_list_inventory_shape() -> None:
 
 def test_list_inventory_sorted() -> None:
     """Verify that the inventory list is returned sorted by device name."""
-    devices = server.list_inventory()
+    devices = server.nornir_list_inventory()
     names = [d["name"] for d in devices]
     assert names == sorted(names)
 
@@ -107,13 +107,13 @@ def test_run_getter_validates_device_first() -> None:
 
 def test_get_network_facts_returns_facts_dict() -> None:
     """Verify the get_network_facts tool returns the correct filtered data."""
-    facts = server.get_network_facts("spine-01")
+    facts = server.nornir_get_facts("spine-01")
     assert facts == {"ok": True}
 
 
 def test_get_network_interfaces_merges_keys() -> None:
     """Verify the get_network_interfaces tool returns the merged interface data."""
-    out = server.get_network_interfaces("leaf-01")
+    out = server.nornir_get_interfaces("leaf-01")
     assert set(out.keys()) == {"interfaces", "interfaces_ip"}
     assert out["interfaces"] == {"ok": True}
     assert out["interfaces_ip"] == {"ok": True}
@@ -122,18 +122,18 @@ def test_get_network_interfaces_merges_keys() -> None:
 def test_run_napalm_getter_rejects_invalid_name() -> None:
     """Verify that run_napalm_getter rejects getter names with invalid characters."""
     with pytest.raises(ValueError, match="Invalid getter name"):
-        server.run_napalm_getter("spine-01", "bad-getter!")
+        server.nornir_run_getter("spine-01", "bad-getter!")
 
 
 def test_run_napalm_getter_returns_payload() -> None:
     """Verify that run_napalm_getter returns the specific getter payload."""
-    out = server.run_napalm_getter("spine-01", "arp_table")
+    out = server.nornir_run_getter("spine-01", "arp_table")
     assert out == {"ok": True}
 
 
 def test_reload_inventory_initial_summary() -> None:
     """Verify the inventory reload summary when starting from an empty state."""
-    report = server.reload_inventory()
+    report = server.nornir_reload_inventory()
     assert report["total"] == 2
     assert set(report["current_hosts"]) == {"spine-01", "leaf-01"}
     assert report["previous_hosts"] == []
@@ -143,7 +143,7 @@ def test_reload_inventory_initial_summary() -> None:
 
 def test_reload_inventory_detects_added_host(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify that inventory reload detects newly added and removed hosts."""
-    server.reload_inventory()
+    server.nornir_reload_inventory()
 
     # Define a new fake state
     new_hosts = {
@@ -165,7 +165,7 @@ def test_reload_inventory_detects_added_host(monkeypatch: pytest.MonkeyPatch) ->
         return FakeNornir(FakeInventory(FakeHosts(new_hosts)))
 
     monkeypatch.setattr("server.InitNornir", mock_init)
-    report = server.reload_inventory()
+    report = server.nornir_reload_inventory()
 
     assert "router-99" in report["current_hosts"]
     assert "router-99" in report["added"]
@@ -175,9 +175,9 @@ def test_reload_inventory_detects_added_host(monkeypatch: pytest.MonkeyPatch) ->
 
 def test_reload_inventory_rebuilds_singleton() -> None:
     """Verify that reloading the inventory creates a new Nornir instance."""
-    server.reload_inventory()
+    server.nornir_reload_inventory()
     before = server._nornir
-    server.reload_inventory()
+    server.nornir_reload_inventory()
     after = server._nornir
     assert before is not None
     assert after is not None
