@@ -90,7 +90,7 @@ def _resolve_filter(nr: Nornir, device_names: str | list[str]) -> Nornir:
         device_names = [device_names]
 
     # Check that all devices exist
-    nr_filtered = nr.filter(name__in=device_names)
+    nr_filtered = nr.filter(filter_func=lambda h: h.name in device_names)
     available = ", ".join(sorted(nr.inventory.hosts)) or "(none)"
 
     if len(nr_filtered.inventory.hosts) == 0:
