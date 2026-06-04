@@ -42,6 +42,9 @@ class FakeHosts:
     def __contains__(self, name: str) -> bool:
         return name in self._hosts
 
+    def keys(self) -> list[str]:
+        return list(self._hosts.keys())
+
     def __iter__(self) -> Iterator[str]:
         return iter(self._hosts)
 
@@ -71,17 +74,21 @@ class FakeNornir:
 
     inventory: FakeInventory
 
-    def filter(self, name: str) -> FakeNornir:
-        host = self.inventory.hosts.get(name)
-        return FakeNornir(FakeInventory(FakeHosts({name: host}) if host else FakeHosts({})))
+    def filter(self, name: str | None = None, name__in: list[str] | None = None) -> FakeNornir:
+        """Filter hosts by name or list of names."""
+        if name__in is not None:
+            filtered = {k: v for k, v in self.inventory.hosts._hosts.items() if k in name__in}
+            return FakeNornir(FakeInventory(FakeHosts(filtered)))
+        if name is not None:
+            host = self.inventory.hosts.get(name)
+            return FakeNornir(FakeInventory(FakeHosts({name: host}) if host else FakeHosts({})))
+        return self
 
     def run(self, task: Any, **kwargs: Any) -> dict[str, list[Any]]:
-        # Get the first host name from the filtered inventory
+        """Run a task against all hosts in the filtered inventory."""
         hosts = self.inventory.hosts._hosts
         if not hosts:
             return {}
-
-        name = next(iter(hosts))
 
         # Dispatch based on which kwargs are present
         if "getters" in kwargs:
@@ -96,12 +103,12 @@ class FakeNornir:
                 },
             }
             result = {g: payloads.get(g, {"ok": True}) for g in getters}
-            return {name: [FakeTaskResult(result)]}
+            return {name: [FakeTaskResult(result)] for name in hosts}
 
         if "commands" in kwargs:
             commands = kwargs["commands"]
             result = {cmd: f"Output for: {cmd}" for cmd in commands}
-            return {name: [FakeTaskResult(result)]}
+            return {name: [FakeTaskResult(result)] for name in hosts}
 
         return {}
 

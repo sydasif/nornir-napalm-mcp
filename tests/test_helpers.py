@@ -79,12 +79,14 @@ def test_list_inventory_sorted() -> None:
 def test_run_getter_returns_getter_payload() -> None:
     """Verify that napalm_get returns the expected payload for a valid host."""
     data = runner._run_getter("spine-01", ["facts"])
-    assert data == {"facts": {"hostname": "test-host", "vendor": "Arista", "model": "7280R"}}
+    assert data == {
+        "spine-01": {"facts": {"hostname": "test-host", "vendor": "Arista", "model": "7280R"}}
+    }
 
 
 def test_run_getter_validates_device_first() -> None:
     """Verify that _run_getter validates device existence before executing tasks."""
-    with pytest.raises(ValueError, match="not found in inventory"):
+    with pytest.raises(ValueError, match="No devices found matching"):
         runner._run_getter("nope", ["facts"])
 
 
@@ -220,7 +222,7 @@ def test_get_config_rejects_invalid_type() -> None:
 
 def test_get_config_unknown_device() -> None:
     """Verify get_config raises ValueError for unknown device."""
-    with pytest.raises(ValueError, match="not found in inventory"):
+    with pytest.raises(ValueError, match="No devices found matching"):
         server.nornir_get_config("nope")
 
 
@@ -264,7 +266,7 @@ def test_run_cli_rejects_empty_commands() -> None:
 
 def test_run_cli_unknown_device() -> None:
     """Verify run_cli raises ValueError for unknown device."""
-    with pytest.raises(ValueError, match="not found in inventory"):
+    with pytest.raises(ValueError, match="No devices found matching"):
         server.nornir_run_cli("nope", ["show version"])
 
 
@@ -456,13 +458,129 @@ def test_reset_nornir_when_already_none() -> None:
     assert previous is None
 
 
-def test_extract_single_result_empty_host_result() -> None:
-    """Verify _extract_single_result raises on empty MultiResult."""
+def test_extract_multiple_result_empty_host_result() -> None:
+    """Verify _extract_multiple_result raises on empty MultiResult."""
     with pytest.raises(RuntimeError, match="Empty result"):
-        runner._extract_single_result({"spine-01": []}, "spine-01")
+        runner._extract_multiple_result({"spine-01": []})
 
 
-def test_extract_single_result_missing_device() -> None:
-    """Verify _extract_single_result raises when device key missing."""
-    with pytest.raises(RuntimeError, match="No result returned"):
-        runner._extract_single_result({}, "nonexistent")
+def test_extract_multiple_result_success() -> None:
+    """Verify _extract_multiple_result extracts results from multiple hosts."""
+    from tests.conftest import FakeTaskResult
+
+    result = {
+        "spine-01": [FakeTaskResult(result={"facts": {"hostname": "spine-01"}})],
+        "leaf-01": [FakeTaskResult(result={"facts": {"hostname": "leaf-01"}})],
+    }
+    extracted = runner._extract_multiple_result(result)
+    assert set(extracted.keys()) == {"spine-01", "leaf-01"}
+    assert extracted["spine-01"]["facts"]["hostname"] == "spine-01"
+
+
+# ---------------------------------------------------------------------------
+# Batch operation tests
+# ---------------------------------------------------------------------------
+
+
+def test_run_getter_batch_returns_dict() -> None:
+    """Verify _run_getter with list returns dict keyed by device name."""
+    data = runner._run_getter(["spine-01", "leaf-01"], ["facts"])
+    assert isinstance(data, dict)
+    assert set(data.keys()) == {"spine-01", "leaf-01"}
+    for dev_data in data.values():
+        assert "facts" in dev_data
+
+
+def test_run_getter_batch_validates_all_devices() -> None:
+    """Verify _run_getter batch raises ValueError if any device not found."""
+    with pytest.raises(ValueError, match="Following devices not found in inventory"):
+        runner._run_getter(["spine-01", "nonexistent"], ["facts"])
+
+
+def test_run_cli_batch_returns_dict() -> None:
+    """Verify _run_cli with list returns dict keyed by device name."""
+    data = runner._run_cli(["spine-01", "leaf-01"], ["show version"])
+    assert isinstance(data, dict)
+    assert set(data.keys()) == {"spine-01", "leaf-01"}
+    for dev_data in data.values():
+        assert "show version" in dev_data
+
+
+def test_nornir_get_facts_batch() -> None:
+    """Verify nornir_get_facts with list returns dict of NetworkFacts."""
+    result = server.nornir_get_facts(["spine-01", "leaf-01"])
+    assert isinstance(result, dict)
+    assert set(result.keys()) == {"spine-01", "leaf-01"}
+    for facts in result.values():
+        assert facts.hostname == "test-host"
+        assert facts.vendor == "Arista"
+
+
+def test_nornir_get_interfaces_batch() -> None:
+    """Verify nornir_get_interfaces with list returns dict of NetworkInterfaces."""
+    result = server.nornir_get_interfaces(["spine-01", "leaf-01"])
+    assert isinstance(result, dict)
+    assert set(result.keys()) == {"spine-01", "leaf-01"}
+    for interfaces in result.values():
+        assert "Ethernet1" in interfaces.interfaces
+
+
+def test_nornir_run_getter_batch() -> None:
+    """Verify nornir_run_getter with list returns dict of results."""
+    result = server.nornir_run_getter(["spine-01", "leaf-01"], "arp_table")
+    assert isinstance(result, dict)
+    assert set(result.keys()) == {"spine-01", "leaf-01"}
+    for dev_result in result.values():
+        assert dev_result == {"ok": True}
+
+
+def test_nornir_get_config_batch() -> None:
+    """Verify nornir_get_config with list returns dict of DeviceConfig."""
+    result = server.nornir_get_config(["spine-01", "leaf-01"])
+    assert isinstance(result, dict)
+    assert set(result.keys()) == {"spine-01", "leaf-01"}
+    for cfg in result.values():
+        assert cfg.running is not None
+        assert cfg.startup is not None
+
+
+def test_nornir_run_cli_batch() -> None:
+    """Verify nornir_run_cli with list returns dict of command outputs."""
+    result = server.nornir_run_cli(["spine-01", "leaf-01"], ["show version"])
+    assert isinstance(result, dict)
+    assert set(result.keys()) == {"spine-01", "leaf-01"}
+    for dev_result in result.values():
+        assert "show version" in dev_result
+
+
+def test_list_inventory_filter_by_platform() -> None:
+    """Verify list_inventory filters by platform."""
+    devices = server.nornir_list_inventory(platform="eos")
+    assert len(devices) == 2
+    assert all(d.platform == "eos" for d in devices)
+
+
+def test_list_inventory_filter_by_platform_no_match() -> None:
+    """Verify list_inventory returns empty when platform doesn't match."""
+    devices = server.nornir_list_inventory(platform="ios")
+    assert devices == []
+
+
+def test_list_inventory_filter_by_group() -> None:
+    """Verify list_inventory filters by group."""
+    devices = server.nornir_list_inventory(group="spine")
+    assert len(devices) == 1
+    assert devices[0].name == "spine-01"
+
+
+def test_list_inventory_filter_by_group_no_match() -> None:
+    """Verify list_inventory returns empty when group doesn't match."""
+    devices = server.nornir_list_inventory(group="nonexistent")
+    assert devices == []
+
+
+def test_list_inventory_filter_by_both() -> None:
+    """Verify list_inventory filters by both group and platform."""
+    devices = server.nornir_list_inventory(group="leaf", platform="eos")
+    assert len(devices) == 1
+    assert devices[0].name == "leaf-01"
