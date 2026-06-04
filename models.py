@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class InventoryDevice(BaseModel):
@@ -23,6 +23,14 @@ class NetworkFacts(BaseModel):
     os_version: str | None = None
     serial_number: str | None = None
     additional_facts: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("hostname", "vendor", "model", "os_version", "serial_number", mode="before")
+    @classmethod
+    def coerce_to_str(cls, v: Any) -> str | None:
+        """Coerce non-string NAPALM data to str."""
+        if v is None:
+            return None
+        return str(v)
 
 
 class NetworkInterfaces(BaseModel):

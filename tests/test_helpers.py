@@ -117,12 +117,18 @@ def test_run_napalm_getter_returns_payload() -> None:
     assert out == {"ok": True}
 
 
-def test_run_napalm_getter_fallback_to_full_dict() -> None:
-    """Verify that run_napalm_getter falls back to full dict when getter key missing."""
-    # The fake always returns the getter key, but test the fallback logic directly
-    data = {"other_getter": {"some": "data"}}
-    result = data.get("arp_table", data)
-    assert result == data
+def test_run_napalm_getter_raises_on_missing_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify that nornir_run_getter raises RuntimeError when getter key is absent."""
+    from tests.conftest import FakeTaskResult
+
+    def mock_run(self, **_):
+        hosts = self.inventory.hosts._hosts
+        name = next(iter(hosts))
+        return {name: [FakeTaskResult(result={"other_getter": {"some": "data"}})]}
+
+    monkeypatch.setattr("tests.conftest.FakeNornir.run", mock_run)
+    with pytest.raises(RuntimeError, match="unexpected response structure"):
+        server.nornir_run_getter("spine-01", "arp_table")
 
 
 def test_reload_inventory_initial_summary() -> None:
@@ -289,3 +295,174 @@ def test_list_getters_sorted_by_platform() -> None:
     results = server.nornir_list_getters()
     names = [r.platform for r in results]
     assert names == sorted(names)
+
+
+# ---------------------------------------------------------------------------
+# Error path tests
+# ---------------------------------------------------------------------------
+
+
+def test_run_getter_raises_on_failed_task(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify _run_getter raises RuntimeError when NAPALM task fails."""
+    from tests.conftest import FakeTaskResult
+
+    def mock_run(self, **_):
+        hosts = self.inventory.hosts._hosts
+        name = next(iter(hosts))
+        return {
+            name: [
+                FakeTaskResult(result={}, failed=True, exception=Exception("Connection refused"))
+            ]
+        }
+
+    monkeypatch.setattr("tests.conftest.FakeNornir.run", mock_run)
+    with pytest.raises(RuntimeError, match="NAPALM task failed"):
+        runner._run_getter("spine-01", ["facts"])
+
+
+def test_get_facts_null_data_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify nornir_get_facts raises RuntimeError when getter returns None."""
+    from tests.conftest import FakeTaskResult
+
+    def mock_run(self, **_):
+        hosts = self.inventory.hosts._hosts
+        name = next(iter(hosts))
+        return {name: [FakeTaskResult(result={"facts": None})]}
+
+    monkeypatch.setattr("tests.conftest.FakeNornir.run", mock_run)
+    with pytest.raises(RuntimeError, match="returned no data"):
+        server.nornir_get_facts("spine-01")
+
+
+def test_get_facts_wrong_type_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify nornir_get_facts raises RuntimeError when getter returns non-dict."""
+    from tests.conftest import FakeTaskResult
+
+    def mock_run(self, **_):
+        hosts = self.inventory.hosts._hosts
+        name = next(iter(hosts))
+        return {name: [FakeTaskResult(result={"facts": "unexpected_string"})]}
+
+    monkeypatch.setattr("tests.conftest.FakeNornir.run", mock_run)
+    with pytest.raises(RuntimeError, match="unexpected type"):
+        server.nornir_get_facts("spine-01")
+
+
+def test_get_config_wrong_type_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify nornir_get_config raises RuntimeError on non-dict config data."""
+    from tests.conftest import FakeTaskResult
+
+    def mock_run(self, **_):
+        hosts = self.inventory.hosts._hosts
+        name = next(iter(hosts))
+        return {name: [FakeTaskResult(result={"config": ["list", "not", "dict"]})]}
+
+    monkeypatch.setattr("tests.conftest.FakeNornir.run", mock_run)
+    with pytest.raises(RuntimeError, match="unexpected type"):
+        server.nornir_get_config("spine-01")
+
+
+def test_get_config_null_data_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify nornir_get_config raises RuntimeError when config getter returns None."""
+    from tests.conftest import FakeTaskResult
+
+    def mock_run(self, **_):
+        hosts = self.inventory.hosts._hosts
+        name = next(iter(hosts))
+        return {name: [FakeTaskResult(result={"config": None})]}
+
+    monkeypatch.setattr("tests.conftest.FakeNornir.run", mock_run)
+    with pytest.raises(RuntimeError, match="returned no data"):
+        server.nornir_get_config("spine-01")
+
+
+def test_list_getters_unknown_platform_returns_empty(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify list_getters returns empty getters for unknown platform."""
+    hosts_data = {
+        "bogus": FakeHost(name="bogus", hostname="10.0.0.1", platform="nonexistent_os", groups=[]),
+    }
+
+    def mock_init(**_):
+        return FakeNornir(FakeInventory(FakeHosts(hosts_data)))
+
+    monkeypatch.setattr("runner.InitNornir", mock_init)
+    runner._nornir = None
+    server._getters_cache = None  # type: ignore[attr-defined]
+    results = server.nornir_list_getters()
+    assert len(results) == 1
+    assert results[0].platform == "nonexistent_os"
+    assert results[0].getters == []
+
+
+def test_run_cli_rejects_whitespace_only_command() -> None:
+    """Verify run_cli rejects command that is only whitespace."""
+    with pytest.raises(ValueError, match="not a read-only show command"):
+        server.nornir_run_cli("spine-01", ["   "])
+
+
+def test_list_inventory_empty(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify list_inventory returns empty list when inventory is empty."""
+
+    def mock_init(**_):
+        return FakeNornir(FakeInventory(FakeHosts({})))
+
+    monkeypatch.setattr("runner.InitNornir", mock_init)
+    runner._nornir = None
+    devices = server.nornir_list_inventory()
+    assert devices == []
+
+
+def test_reset_nornir_returns_previous() -> None:
+    """Verify reset_nornir returns the previous instance and clears the singleton."""
+    runner._get_nornir()
+    previous = runner.reset_nornir()
+    assert previous is not None
+    assert runner._nornir is None
+
+
+def test_getters_cache_cleared_on_reload() -> None:
+    """Verify getters cache is cleared after inventory reload."""
+    server.nornir_list_getters()
+    assert server._getters_cache is not None
+    server.nornir_reload_inventory()
+    assert server._getters_cache is None
+
+
+def test_getters_cache_hit_returns_cached() -> None:
+    """Verify second call to list_getters returns cached result."""
+    # Ensure fresh state then call twice within the same test
+    runner._get_nornir()  # populate singleton
+    server._getters_cache = None
+    first = server.nornir_list_getters()
+    assert server._getters_cache is not None
+    second = server.nornir_list_getters()
+    assert first is second
+
+
+def test_network_facts_coerces_int_to_str() -> None:
+    """Verify NetworkFacts field_validator coerces non-string values to str."""
+    from models import NetworkFacts
+
+    facts = NetworkFacts(hostname=123, vendor=None, model=True)  # type: ignore[arg-type]
+    assert facts.hostname == "123"
+    assert facts.vendor is None
+    assert facts.model == "True"
+
+
+def test_reset_nornir_when_already_none() -> None:
+    """Verify reset_nornir returns None when singleton is not initialised."""
+    runner._nornir = None
+    previous = runner.reset_nornir()
+    assert previous is None
+
+
+def test_extract_single_result_empty_host_result() -> None:
+    """Verify _extract_single_result raises on empty MultiResult."""
+    with pytest.raises(RuntimeError, match="Empty result"):
+        runner._extract_single_result({"spine-01": []}, "spine-01")
+
+
+def test_extract_single_result_missing_device() -> None:
+    """Verify _extract_single_result raises when device key missing."""
+    with pytest.raises(RuntimeError, match="No result returned"):
+        runner._extract_single_result({}, "nonexistent")

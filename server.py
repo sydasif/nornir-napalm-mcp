@@ -23,6 +23,7 @@ from runner import (
     _get_nornir,
     _run_cli,
     _run_getter,
+    reset_nornir,
 )
 
 # ---------------------------------------------------------------------------
@@ -142,15 +143,21 @@ def nornir_run_getter(device_name: str, getter: str) -> Any:
 
     Raises:
         ValueError: If the getter name contains invalid characters.
+        RuntimeError: If the getter key is missing from the response.
     """
-    if not getter.replace("_", "").isalpha():
+    if not getter.replace("_", "").isalnum():
         raise ValueError(
             f"Invalid getter name '{getter}'. "
-            "Use lowercase letters and underscores only (e.g. 'arp_table')."
+            "Use lowercase letters, digits, and underscores only (e.g. 'arp_table')."
         )
 
     data = _run_getter(device_name, [getter])
-    return data.get(getter, data)
+    if getter not in data:
+        raise RuntimeError(
+            f"NAPALM getter '{getter}' returned unexpected response structure "
+            f"for '{device_name}'. Expected key '{getter}' not found in result."
+        )
+    return data[getter]
 
 
 @mcp.tool()
@@ -183,7 +190,12 @@ def nornir_get_config(
         )
 
     data = _run_getter(device_name, ["config"])
-    config_data = data.get("config", data)
+    config_data = data.get("config")
+    if config_data is None:
+        raise RuntimeError(
+            f"NAPALM 'config' getter returned no data for '{device_name}'. "
+            "Check device connectivity."
+        )
 
     if not isinstance(config_data, dict):
         raise RuntimeError(
@@ -229,16 +241,24 @@ def nornir_run_cli(device_name: str, commands: list[str]) -> dict[str, str]:
     return _run_cli(device_name, commands)
 
 
+_getters_cache: list[GetterInfo] | None = None
+
+
 @mcp.tool()
 def nornir_list_getters() -> list[GetterInfo]:
     """List available NAPALM getters for each platform in the inventory.
 
     Introspects the NAPALM driver for each unique platform to discover which
     getters are supported. No device connection is required — this is instant.
+    Results are cached until nornir_reload_inventory is called.
 
     Returns:
         A list of GetterInfo objects, one per platform found in the inventory.
     """
+    global _getters_cache
+    if _getters_cache is not None:
+        return _getters_cache
+
     nr = _get_nornir()
     platforms = {str(host.platform) for host in nr.inventory.hosts.values()}
 
@@ -252,11 +272,17 @@ def nornir_list_getters() -> list[GetterInfo]:
                 for name in dir(driver)
                 if name.startswith("get_") and callable(getattr(driver, name))
             )
-        except (ModuleNotFoundError, TypeError):
+        except Exception as exc:
+            if (
+                not isinstance(exc, (ModuleNotFoundError, TypeError))
+                and not type(exc).__name__ == "ModuleImportError"
+            ):
+                raise
             log.warning("Could not introspect NAPALM driver for platform '%s'", platform)
             getters = []
         results.append(GetterInfo(platform=platform, getters=getters))
 
+    _getters_cache = results
     return results
 
 
@@ -270,14 +296,10 @@ def nornir_reload_inventory() -> ReloadSummary:
     Returns:
         A structured ReloadSummary containing added, removed, and total hosts.
     """
-    from runner import _nornir
-
-    previous = sorted(_nornir.inventory.hosts) if _nornir is not None else []
-
-    # Reset the cached Nornir instance by importing and modifying the module global
-    import runner
-
-    runner._nornir = None
+    global _getters_cache
+    previous_nornir = reset_nornir()
+    previous = sorted(previous_nornir.inventory.hosts) if previous_nornir is not None else []
+    _getters_cache = None
 
     rebuilt = _get_nornir()
     current = sorted(rebuilt.inventory.hosts)
@@ -301,18 +323,18 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Nornir-NAPALM FastMCP Server")
     parser.add_argument(
         "--transport",
-        choices=["stdio", "sse"],
+        choices=["stdio", "http"],
         default="stdio",
         help="MCP transport (default: stdio for Claude Desktop)",
     )
-    parser.add_argument("--host", default="0.0.0.0", help="SSE bind host")
-    parser.add_argument("--port", type=int, default=8000, help="SSE bind port")
+    parser.add_argument("--host", default="127.0.0.1", help="HTTP bind host (default: 127.0.0.1)")
+    parser.add_argument("--port", type=int, default=8000, help="HTTP bind port")
     args = parser.parse_args()
 
     match args.transport:
-        case "sse":
-            log.info("Starting SSE server on %s:%d", args.host, args.port)
-            mcp.run(transport="sse", host=args.host, port=args.port)
+        case "http":
+            log.info("Starting HTTP server on %s:%d", args.host, args.port)
+            mcp.run(transport="http", host=args.host, port=args.port)
         case "stdio":
             log.info("Starting STDIO server (Claude Desktop mode)")
             mcp.run(transport="stdio")

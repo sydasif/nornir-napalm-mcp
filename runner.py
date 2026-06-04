@@ -2,6 +2,7 @@
 
 import logging
 import os
+import threading
 from pathlib import Path
 from typing import Any, cast
 
@@ -12,6 +13,7 @@ from nornir_napalm.plugins.tasks import napalm_cli, napalm_get
 log = logging.getLogger("nornir-napalm-mcp")
 
 _nornir: Nornir | None = None
+_nornir_lock = threading.Lock()
 
 
 def _resolve_config() -> Path:
@@ -42,17 +44,33 @@ def _get_nornir() -> Nornir:
 
     Lazy initialisation means a broken inventory does not prevent the
     MCP server from starting and exposing its tool catalogue.
+    Thread-safe via double-checked locking.
 
     Returns:
         The initialized Nornir instance.
     """
     global _nornir
     if _nornir is None:
-        config_path = _resolve_config()
-        log.info("Initialising Nornir from %s", config_path)
-        _nornir = InitNornir(config_file=str(config_path))
-        log.info("Nornir initialised with %d hosts.", len(_nornir.inventory.hosts))
+        with _nornir_lock:
+            if _nornir is None:
+                config_path = _resolve_config()
+                log.info("Initialising Nornir from %s", config_path)
+                _nornir = InitNornir(config_file=str(config_path))
+                log.info("Nornir initialised with %d hosts.", len(_nornir.inventory.hosts))
     return _nornir
+
+
+def reset_nornir() -> Nornir | None:
+    """Reset the cached Nornir instance.
+
+    Returns the previous instance (or None if not initialised).
+    Thread-safe via the same lock as _get_nornir().
+    """
+    global _nornir
+    with _nornir_lock:
+        previous = _nornir
+        _nornir = None
+    return previous
 
 
 def _resolve_device(nr: Nornir, device_name: str) -> None:
@@ -84,9 +102,16 @@ def _extract_single_result(result: dict[str, Any], device_name: str) -> dict[str
         The raw result dict from the task.
 
     Raises:
-        RuntimeError: If the task failed or returned no result.
+        RuntimeError: If the task failed, returned no result, or device is missing.
     """
+    if device_name not in result:
+        raise RuntimeError(
+            f"No result returned for '{device_name}'. "
+            "The device may not exist or the filter matched no hosts."
+        )
     host_result = result[device_name]
+    if not host_result:
+        raise RuntimeError(f"Empty result for '{device_name}'. The task produced no output.")
     task_result = host_result[0]
 
     if task_result.failed:

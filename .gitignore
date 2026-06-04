@@ -13,5 +13,7 @@ build/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.coverage
+coverage.xml
 .DS_Store
 *.pdf
