@@ -74,8 +74,16 @@ class FakeNornir:
 
     inventory: FakeInventory
 
-    def filter(self, name: str | None = None, name__in: list[str] | None = None) -> FakeNornir:
+    def filter(
+        self,
+        name: str | None = None,
+        name__in: list[str] | None = None,
+        filter_func: Any = None,
+    ) -> FakeNornir:
         """Filter hosts by name or list of names."""
+        if filter_func is not None:
+            filtered = {k: v for k, v in self.inventory.hosts._hosts.items() if filter_func(v)}
+            return FakeNornir(FakeInventory(FakeHosts(filtered)))
         if name__in is not None:
             filtered = {k: v for k, v in self.inventory.hosts._hosts.items() if k in name__in}
             return FakeNornir(FakeInventory(FakeHosts(filtered)))

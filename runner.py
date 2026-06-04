@@ -89,7 +89,6 @@ def _resolve_filter(nr: Nornir, device_names: str | list[str]) -> Nornir:
     if isinstance(device_names, str):
         device_names = [device_names]
 
-    # Check that all devices exist
     nr_filtered = nr.filter(filter_func=lambda h: h.name in device_names)
     available = ", ".join(sorted(nr.inventory.hosts)) or "(none)"
 
@@ -170,13 +169,5 @@ def _run_cli(device_name: str | list[str], commands: list[str]) -> dict[str, dic
     nr = _get_nornir()
     nr_filtered = _resolve_filter(nr, device_name)
     result = nr_filtered.run(task=napalm_cli, commands=commands)
-    # We know the result is dict[str, str] for each host, so we cast accordingly
-    extracted: dict[str, dict[str, str]] = {}
-    for host_name, multi_result in result.items():
-        if not multi_result:
-            raise RuntimeError(f"Empty result for '{host_name}'. The task produced no output.")
-        task_result = multi_result[0]
-        if task_result.failed:
-            raise RuntimeError(f"NAPALM task failed for '{host_name}': {task_result.exception}")
-        extracted[host_name] = cast(dict[str, str], task_result.result)
-    return extracted
+    # CLI results are dict[str, str] per host
+    return cast(dict[str, dict[str, str]], _extract_multiple_result(result))

@@ -389,7 +389,7 @@ def test_list_getters_unknown_platform_returns_empty(monkeypatch: pytest.MonkeyP
 
     monkeypatch.setattr("runner.InitNornir", mock_init)
     runner._nornir = None
-    server._getters_cache = None  # type: ignore[attr-defined]
+    server._getters_cache = None
     results = server.nornir_list_getters()
     assert len(results) == 1
     assert results[0].platform == "nonexistent_os"

@@ -76,6 +76,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `test_helpers.py` - Unit tests covering all MCP tools with mocked Nornir responses
 - Tests use monkeypatching to replace `InitNornir` with fake inventory
 - Test data includes spine-01 and leaf-01 devices for consistent assertions
+- **⚠ Gotcha**: `nr.filter(name__in=[...])` silently returns empty in Nornir 3.5.0. Use `nr.filter(filter_func=lambda h: h.name in [...])` instead. The `FakeNornir` in `conftest.py` supports both, but real Nornir only handles `filter_func` correctly for hostname matching. Always verify filter changes against a real Nornir instance.
 
 ### Key Design Patterns
 
