@@ -19,12 +19,6 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Install the drivers you actually need
-eos    = ["napalm[eos]"]
-junos  = ["napalm[junos]"]
-ios    = ["napalm[ios]"]
-all-drivers = ["napalm[eos,junos,ios]"]
-
 dev = [
     "pytest>=7.0",
     "pytest-asyncio",

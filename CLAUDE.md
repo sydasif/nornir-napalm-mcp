@@ -25,7 +25,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Sync dependencies: `uv sync`
 - Add dependency: `uv add <package>`
 - Add dev dependency: `uv add --dev <package>`
-- Sync with extras (drivers): `uv sync --extra <eos|junos|ios|all-drivers>`
 - Update lockfile: `uv lock`
 
 **Development Server**
@@ -34,11 +33,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Claude Desktop install: `fastmcp install server.py`
 - Run STDIO transport: `python server.py --transport stdio`
 - Run SSE transport: `python server.py --transport sse --host 0.0.0.0 --port 8000`
-
-**Docker**
-
-- Build: `docker build -t nornir-napalm-mcp .`
-- Run: `docker run -p 8000:8000 -v $(pwd)/inventory:/app/inventory nornir-napalm-mcp`
 
 ## Code Architecture
 
@@ -55,13 +49,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   5. `nornir_reload_inventory` - Reloads YAML inventory files
 - Singleton Nornir pattern: `_get_nornir()` caches instance after first initialization
 - Error handling with meaningful error messages for missing devices or failed getters
-
-**Inventory Structure** (`inventory/` directory):
-
-- `hosts.yaml` - Per-device configuration (hostname, platform, group membership)
-- `groups.yaml` - Group-level variables and settings
-- `defaults.yaml` - Global defaults (credentials, ports, etc.)
-- Configuration loaded via `config.yaml` which specifies inventory and runner settings
 
 **Testing Approach** (`tests/` directory):
 
@@ -95,7 +82,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Testing: pytest, pytest-asyncio, pytest-cov
 - Linting: ruff
 - Typing: mypy
-- Optional drivers: napalm[eos], napalm[junos], napalm[ios] (via extras)
+
+## Companion Projects
+
+- **nornir-mcp-lab** (`/home/zulu/Documents/nornir-mcp-lab`): Containerlab test lab with real Cisco CSR1000v + Arista cEOS devices. Its `.mcp.json` registers this server with `NORNIR_CONFIG` pointing to the lab's inventory. Use it for integration testing against live devices.
 
 ## Error Handling Conventions
 

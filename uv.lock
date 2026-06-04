@@ -1285,9 +1285,6 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
-all-drivers = [
-    { name = "napalm" },
-]
 dev = [
     { name = "mypy" },
     { name = "pytest" },
@@ -1295,25 +1292,12 @@ dev = [
     { name = "pytest-cov" },
     { name = "ruff" },
 ]
-eos = [
-    { name = "napalm" },
-]
-ios = [
-    { name = "napalm" },
-]
-junos = [
-    { name = "napalm" },
-]
 
 [package.metadata]
 requires-dist = [
     { name = "fastmcp", specifier = ">=2.0" },
     { name = "mypy", marker = "extra == 'dev'" },
     { name = "napalm", specifier = ">=5.0" },
-    { name = "napalm", extras = ["eos"], marker = "extra == 'eos'" },
-    { name = "napalm", extras = ["eos", "junos", "ios"], marker = "extra == 'all-drivers'" },
-    { name = "napalm", extras = ["ios"], marker = "extra == 'ios'" },
-    { name = "napalm", extras = ["junos"], marker = "extra == 'junos'" },
     { name = "nornir", specifier = ">=3.4" },
     { name = "nornir-napalm", specifier = ">=0.4" },
     { name = "nornir-utils", specifier = ">=0.2" },
@@ -1322,7 +1306,7 @@ requires-dist = [
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=7.1.0" },
     { name = "ruff", marker = "extra == 'dev'" },
 ]
-provides-extras = ["eos", "junos", "ios", "all-drivers", "dev"]
+provides-extras = ["dev"]
 
 [[package]]
 name = "nornir-utils"

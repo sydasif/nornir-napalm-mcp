@@ -40,28 +40,54 @@ All operations are **read-only** — no configuration push is exposed.
 # Clone and install
 git clone <repo-url> && cd net-tool
 
-# Install with the drivers you need
-uv sync --extra eos         # Arista EOS
-uv sync --extra junos       # Juniper JunOS
-uv sync --extra ios         # Cisco IOS/IOS-XE
-uv sync --extra all-drivers # All of the above
+# Install
+uv sync
 ```
 
-### Configure inventory
+### Nornir configuration
 
-Edit the YAML files under `inventory/`:
+Create a `config.yaml` in the project root:
 
-- `hosts.yaml` — per-device entries (hostname, platform, groups)
-- `groups.yaml` — group-level overrides
-- `defaults.yaml` — global defaults (credentials, port)
+```yaml
+---
+inventory:
+  plugin: SimpleInventory
+  options:
+    host_file: "inventory/hosts.yaml"
+    group_file: "inventory/groups.yaml"
+    defaults_file: "inventory/defaults.yaml"
 
-> **Security:** Do not commit plaintext credentials. Use environment variables via `nornir-env-transform`, HashiCorp Vault, or a secrets manager.
+runner:
+  plugin: threaded
+  options:
+    num_workers: 10
+
+logging:
+  enabled: false
+```
+
+The inventory files (`hosts.yaml`, `groups.yaml`, `defaults.yaml`) define your network devices. See the [nornir-mcp-lab inventory](https://github.com/sydasif/nornir-mcp-lab/tree/main/inventory) for a working example.
 
 ### Environment variables
 
 | Variable        | Default       | Description                         |
 | --------------- | ------------- | ----------------------------------- |
 | `NORNIR_CONFIG` | `config.yaml` | Path to the Nornir bootstrap config |
+
+### MCP client configuration
+
+Register this server with any MCP client (Claude Desktop, VS Code, etc.) by adding the following to your project's `.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "nornir": {
+      "command": "uv",
+      "args": ["run", "--directory", "/path/to/net-tool", "python", "server.py"]
+    }
+  }
+}
+```
 
 ---
 
@@ -89,41 +115,26 @@ python server.py --transport stdio
 python server.py --transport sse --host 0.0.0.0 --port 8000
 ```
 
-### Docker
-
-```bash
-# Build
-docker build -t nornir-napalm-mcp .
-
-# Run — mount your inventory directory
-docker run -p 8000:8000 \
-  -v $(pwd)/inventory:/app/inventory \
-  nornir-napalm-mcp
-```
-
-#### docker-compose
-
-```yaml
-services:
-  mcp:
-    image: nornir-napalm-mcp
-    ports:
-      - "8000:8000"
-    volumes:
-      - ./inventory:/app/inventory:ro
-    environment:
-      - NORNIR_CONFIG=/app/config.yaml
-    restart: unless-stopped
-```
-
 ### NAPALM getters
 
 Use `nornir_run_getter` with any of these:
 
-`arp_table`, `bgp_neighbors`, `bgp_neighbors_detail`, `bgp_config`,
-`environment`, `lldp_neighbors`, `lldp_neighbors_detail`,
-`mac_address_table`, `ntp_servers`, `ntp_stats`,
-`optics`, `route_to`, `snmp_information`, `users`, `vlans`
+| Getter                  | Description                                      |
+| ----------------------- | ------------------------------------------------ |
+| `arp_table`             | ARP table                                        |
+| `bgp_config`            | BGP running configuration                        |
+| `bgp_neighbors`         | BGP neighbors summary                            |
+| `bgp_neighbors_detail`  | BGP neighbors detailed                           |
+| `config`                | Running/startup/candidate configuration          |
+| `facts`                 | System facts (vendor, model, OS, serial, uptime) |
+| `interfaces`            | Interface status and details                     |
+| `interfaces_ip`         | IP addresses on interfaces                       |
+| `lldp_neighbors`        | LLDP neighbors summary                           |
+| `lldp_neighbors_detail` | LLDP neighbors detailed                          |
+| `mac_address_table`     | MAC address table                                |
+| `ntp_servers`           | NTP server configuration                         |
+| `snmp_information`      | SNMP configuration                               |
+| `vlans`                 | VLAN information                                 |
 
 ---
 
@@ -132,13 +143,7 @@ Use `nornir_run_getter` with any of these:
 ```
 net-tool/
 ├── server.py              # FastMCP server, Nornir init, tool definitions
-├── config.yaml            # Nornir bootstrap config (inventory + runner)
 ├── pyproject.toml         # Build config, dependencies, tool settings
-├── Dockerfile             # Multi-stage build (uv → slim runtime)
-├── inventory/
-│   ├── hosts.yaml         # Per-device entries
-│   ├── groups.yaml        # Group-level overrides
-│   └── defaults.yaml      # Global defaults
 └── tests/
     ├── conftest.py        # Fake Nornir stubs and fixtures
     └── test_helpers.py    # Unit tests for server.py
