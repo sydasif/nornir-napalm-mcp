@@ -98,10 +98,15 @@ _nornir: Nornir | None = None
 
 
 def _resolve_config() -> Path:
-    """Resolve the Nornir config file path.
+    """Resolve the Nornir config file path and switch to its directory.
 
     Honors the NORNIR_CONFIG env var. Relative paths are resolved against
     the directory containing this server module.
+
+    Changes the working directory to the config file's parent so that
+    Nornir's SimpleInventory can resolve relative inventory file paths
+    (host_file, group_file, defaults_file) correctly regardless of how
+    the server was launched.
 
     Returns:
         The absolute path to the Nornir configuration file.
@@ -110,7 +115,9 @@ def _resolve_config() -> Path:
     path = Path(raw)
     if not path.is_absolute():
         path = Path(__file__).resolve().parent / path
-    return path.resolve()
+    config_path = path.resolve()
+    os.chdir(config_path.parent)
+    return config_path
 
 
 def _get_nornir() -> Nornir:

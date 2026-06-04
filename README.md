@@ -46,7 +46,11 @@ uv sync
 
 ### Nornir configuration
 
-Create a `config.yaml` in the project root:
+The server requires a Nornir configuration file. You can provide it in two ways:
+
+#### 1. Default (no env var)
+
+Place a `config.yaml` in the project root:
 
 ```yaml
 ---
@@ -66,7 +70,17 @@ logging:
   enabled: false
 ```
 
-The inventory files (`hosts.yaml`, `groups.yaml`, `defaults.yaml`) define your network devices. See the [nornir-mcp-lab inventory](https://github.com/sydasif/nornir-mcp-lab/tree/main/inventory) for a working example.
+_Note: The inventory files must exist relative to this config file._
+
+#### 2. External (using `NORNIR_CONFIG`)
+
+Set the `NORNIR_CONFIG` environment variable to point to an external configuration file (e.g., for use with a test lab):
+
+```bash
+export NORNIR_CONFIG=/path/to/your/config.yaml
+```
+
+---
 
 ### Environment variables
 
@@ -76,7 +90,11 @@ The inventory files (`hosts.yaml`, `groups.yaml`, `defaults.yaml`) define your n
 
 ### MCP client configuration
 
-Register this server with any MCP client (Claude Desktop, VS Code, etc.) by adding the following to your project's `.mcp.json`:
+Register this server with any MCP client (Claude Desktop, VS Code, etc.) by adding one of the following to your project's `.mcp.json`:
+
+#### 1. Default (Local config)
+
+Uses `config.yaml` in the `net-tool` directory.
 
 ```json
 {
@@ -84,6 +102,30 @@ Register this server with any MCP client (Claude Desktop, VS Code, etc.) by addi
     "nornir": {
       "command": "uv",
       "args": ["run", "--directory", "/path/to/net-tool", "python", "server.py"]
+    }
+  }
+}
+```
+
+#### 2. External (Lab config)
+
+Uses an external configuration file via environment variable.
+
+```json
+{
+  "mcpServers": {
+    "nornir": {
+      "command": "uv",
+      "args": [
+        "run",
+        "--directory",
+        "/path/to/net-tool",
+        "python",
+        "server.py"
+      ],
+      "env": {
+        "NORNIR_CONFIG": "/path/to/lab/config.yaml"
+      }
     }
   }
 }
