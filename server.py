@@ -53,11 +53,18 @@ mcp = FastMCP(
 
 
 @mcp.tool()
-def nornir_list_inventory() -> list[InventoryDevice]:
-    """List all network devices loaded from the YAML inventory.
+def nornir_list_inventory(
+    group: str | None = None, platform: str | None = None
+) -> list[InventoryDevice]:
+    """List network devices loaded from the YAML inventory, optionally filtered
+    by group or platform.
 
     Returns a list of devices with their hostname, platform, and group membership.
     Always call this first to discover what devices are available.
+
+    Args:
+        group: Optional group name to filter devices.
+        platform: Optional platform name to filter devices.
 
     Returns:
         A sorted list of devices.
@@ -65,6 +72,10 @@ def nornir_list_inventory() -> list[InventoryDevice]:
     nr = _get_nornir()
     devices: list[InventoryDevice] = []
     for host in nr.inventory.hosts.values():
+        if group is not None and group not in [g.name for g in host.groups]:
+            continue
+        if platform is not None and str(host.platform) != platform:
+            continue
         devices.append(
             InventoryDevice(
                 name=host.name,
@@ -76,70 +87,142 @@ def nornir_list_inventory() -> list[InventoryDevice]:
     return sorted(devices, key=attrgetter("name"))
 
 
-@mcp.tool()
-def nornir_get_facts(device_name: str) -> NetworkFacts:
-    """Fetch system facts for a specific device.
+def _parse_facts(dev: str, facts_data: Any) -> NetworkFacts:
+    """Parse NAPALM facts data into a NetworkFacts model.
 
     Args:
-        device_name: Exact host name as defined in hosts.yaml (case-sensitive).
+        dev: Device name (for error messages).
+        facts_data: Raw facts data from NAPALM.
 
     Returns:
-        A structured NetworkFacts object containing hostname, vendor, model, etc.
+        A structured NetworkFacts object.
 
     Raises:
-        RuntimeError: If the 'facts' getter returns no data.
+        RuntimeError: If data is None or not a dict.
     """
-    data = _run_getter(device_name, ["facts"])
-    facts_data = data.get("facts")
     if facts_data is None:
         raise RuntimeError(
-            f"NAPALM 'facts' getter returned no data for '{device_name}'. "
+            f"NAPALM 'facts' getter returned no data for '{dev}'. "
             "Check the device connectivity or try nornir_run_getter with a different getter."
         )
 
     if not isinstance(facts_data, dict):
         raise RuntimeError(
             f"NAPALM 'facts' getter returned unexpected type {type(facts_data).__name__} "
-            f"for '{device_name}'. Expected a dict."
+            f"for '{dev}'. Expected a dict."
         )
 
     standard_fields = {"hostname", "vendor", "model", "os_version", "serial_number"}
-
     return NetworkFacts(
         **{k: v for k, v in facts_data.items() if k in standard_fields},
         additional_facts={k: v for k, v in facts_data.items() if k not in standard_fields},
     )
 
 
-@mcp.tool()
-def nornir_get_interfaces(device_name: str) -> NetworkInterfaces:
-    """Fetch interface details and IP address assignments for a specific device.
+def _parse_config(dev: str, config_data: Any, config_type: str) -> DeviceConfig:
+    """Parse NAPALM config data into a DeviceConfig model.
 
     Args:
-        device_name: Exact host name as defined in hosts.yaml (case-sensitive).
+        dev: Device name (for error messages).
+        config_data: Raw config data from NAPALM.
+        config_type: Which config to extract ('running', 'startup', or 'both').
 
     Returns:
-        A structured NetworkInterfaces object.
+        A DeviceConfig object.
+
+    Raises:
+        RuntimeError: If data is None or not a dict.
     """
-    data = _run_getter(device_name, ["interfaces", "interfaces_ip"])
-    return NetworkInterfaces(
-        interfaces=data.get("interfaces", {}),
-        interfaces_ip=data.get("interfaces_ip", {}),
-    )
+    if config_data is None:
+        raise RuntimeError(
+            f"NAPALM 'config' getter returned no data for '{dev}'. Check device connectivity."
+        )
+
+    if not isinstance(config_data, dict):
+        raise RuntimeError(
+            f"NAPALM 'config' getter returned unexpected type {type(config_data).__name__} "
+            f"for '{dev}'. Expected a dict."
+        )
+
+    running = config_data.get("running") if config_type in ("running", "both") else None
+    startup = config_data.get("startup") if config_type in ("startup", "both") else None
+    return DeviceConfig(running=running, startup=startup)
 
 
 @mcp.tool()
-def nornir_run_getter(device_name: str, getter: str) -> Any:
-    """Run any supported NAPALM getter on a specific device.
+def nornir_get_facts(device_name: str | list[str]) -> NetworkFacts | dict[str, NetworkFacts]:
+    """Fetch system facts for a specific device or list of devices.
+
+    Args:
+        device_name: Exact host name as defined in hosts.yaml (case-sensitive),
+                     or a list of host names.
+
+    Returns:
+        A structured NetworkFacts object for a single device, or a dict mapping
+        device names to NetworkFacts objects for multiple devices.
+
+    Raises:
+        RuntimeError: If the 'facts' getter returns no data.
+        ValueError: If device is not found in inventory.
+    """
+    data = _run_getter(device_name, ["facts"])
+
+    # Single device: return directly
+    if isinstance(device_name, str):
+        return _parse_facts(device_name, data[device_name].get("facts"))
+
+    # Multiple devices: extract per-device
+    return {dev: _parse_facts(dev, dev_data.get("facts")) for dev, dev_data in data.items()}
+
+
+@mcp.tool()
+def nornir_get_interfaces(
+    device_name: str | list[str],
+) -> NetworkInterfaces | dict[str, NetworkInterfaces]:
+    """Fetch interface details and IP address assignments for a specific device or list of devices.
+
+    Args:
+        device_name: Exact host name as defined in hosts.yaml (case-sensitive),
+                     or a list of host names.
+
+    Returns:
+        A structured NetworkInterfaces object for a single device, or a dict mapping
+        device names to NetworkInterfaces objects for multiple devices.
+    """
+    data = _run_getter(device_name, ["interfaces", "interfaces_ip"])
+
+    # Single device: return directly
+    if isinstance(device_name, str):
+        dev_data = data[device_name]
+        return NetworkInterfaces(
+            interfaces=dev_data.get("interfaces", {}),
+            interfaces_ip=dev_data.get("interfaces_ip", {}),
+        )
+
+    # Multiple devices: extract per-device
+    return {
+        dev: NetworkInterfaces(
+            interfaces=dev_data.get("interfaces", {}),
+            interfaces_ip=dev_data.get("interfaces_ip", {}),
+        )
+        for dev, dev_data in data.items()
+    }
+
+
+@mcp.tool()
+def nornir_run_getter(device_name: str | list[str], getter: str) -> Any | dict[str, Any]:
+    """Run any supported NAPALM getter on a specific device or list of devices.
 
     Useful for getters not covered by dedicated tools (e.g., 'arp_table', 'vlans').
 
     Args:
-        device_name: Exact host name as defined in hosts.yaml (case-sensitive).
+        device_name: Exact host name as defined in hosts.yaml (case-sensitive),
+                     or a list of host names.
         getter: NAPALM getter name (without the "get_" prefix).
 
     Returns:
-        The result of the NAPALM getter.
+        The result of the NAPALM getter for a single device, or a dict mapping
+        device names to their getter results for multiple devices.
 
     Raises:
         ValueError: If the getter name contains invalid characters.
@@ -152,31 +235,48 @@ def nornir_run_getter(device_name: str, getter: str) -> Any:
         )
 
     data = _run_getter(device_name, [getter])
-    if getter not in data:
-        raise RuntimeError(
-            f"NAPALM getter '{getter}' returned unexpected response structure "
-            f"for '{device_name}'. Expected key '{getter}' not found in result."
-        )
-    return data[getter]
+
+    # Single device: return directly
+    if isinstance(device_name, str):
+        dev_data = data[device_name]
+        if getter not in dev_data:
+            raise RuntimeError(
+                f"NAPALM getter '{getter}' returned unexpected response structure "
+                f"for '{device_name}'. Expected key '{getter}' not found in result."
+            )
+        return dev_data[getter]
+
+    # Multiple devices: extract per-device
+    results: dict[str, Any] = {}
+    for dev, dev_data in data.items():
+        if getter not in dev_data:
+            raise RuntimeError(
+                f"NAPALM getter '{getter}' returned unexpected response structure "
+                f"for '{dev}'. Expected key '{getter}' not found in result."
+            )
+        results[dev] = dev_data[getter]
+    return results
 
 
 @mcp.tool()
 def nornir_get_config(
-    device_name: str,
+    device_name: str | list[str],
     config_type: str = "both",
-) -> DeviceConfig:
-    """Retrieve the running and/or startup configuration from a device.
+) -> DeviceConfig | dict[str, DeviceConfig]:
+    """Retrieve the running and/or startup configuration from a device or list of devices.
 
     Uses NAPALM's get_config getter to fetch configuration files. Note that
     configuration output may contain sensitive information such as passwords
     or community strings.
 
     Args:
-        device_name: Exact host name as defined in hosts.yaml (case-sensitive).
+        device_name: Exact host name as defined in hosts.yaml (case-sensitive),
+                     or a list of host names.
         config_type: Which config to retrieve — 'running', 'startup', or 'both' (default).
 
     Returns:
-        A DeviceConfig object with running and/or startup configuration text.
+        A DeviceConfig object with running and/or startup configuration text for a single device,
+        or a dict mapping device names to DeviceConfig objects for multiple devices.
 
     Raises:
         ValueError: If config_type is not one of 'running', 'startup', or 'both'.
@@ -190,39 +290,36 @@ def nornir_get_config(
         )
 
     data = _run_getter(device_name, ["config"])
-    config_data = data.get("config")
-    if config_data is None:
-        raise RuntimeError(
-            f"NAPALM 'config' getter returned no data for '{device_name}'. "
-            "Check device connectivity."
-        )
 
-    if not isinstance(config_data, dict):
-        raise RuntimeError(
-            f"NAPALM 'config' getter returned unexpected type {type(config_data).__name__} "
-            f"for '{device_name}'. Expected a dict."
-        )
+    # Single device: return directly
+    if isinstance(device_name, str):
+        return _parse_config(device_name, data[device_name].get("config"), config_type)
 
-    running = config_data.get("running") if config_type in ("running", "both") else None
-    startup = config_data.get("startup") if config_type in ("startup", "both") else None
-
-    return DeviceConfig(running=running, startup=startup)
+    # Multiple devices: extract per-device
+    return {
+        dev: _parse_config(dev, dev_data.get("config"), config_type)
+        for dev, dev_data in data.items()
+    }
 
 
 @mcp.tool()
-def nornir_run_cli(device_name: str, commands: list[str]) -> dict[str, str]:
-    """Execute read-only CLI commands on a device and return their output.
+def nornir_run_cli(
+    device_name: str | list[str], commands: list[str]
+) -> dict[str, str] | dict[str, dict[str, str]]:
+    """Execute read-only CLI commands on a device or list of devices and return their output.
 
     Sends operational commands (e.g., 'show ip interface brief') via NAPALM's
     cli() method. Only 'show' commands are permitted for safety — configuration
     commands are rejected.
 
     Args:
-        device_name: Exact host name as defined in hosts.yaml (case-sensitive).
+        device_name: Exact host name as defined in hosts.yaml (case-sensitive),
+                     or a list of host names.
         commands: List of CLI commands to execute (must start with 'show').
 
     Returns:
-        A dict mapping each command string to its output text.
+        A dict mapping each command string to its output text for a single device,
+        or a dict mapping device names to dicts of command outputs for multiple devices.
 
     Raises:
         ValueError: If any command does not start with 'show', or device not found.
@@ -238,7 +335,14 @@ def nornir_run_cli(device_name: str, commands: list[str]) -> dict[str, str]:
                 "Only 'show' commands are permitted for safety."
             )
 
-    return _run_cli(device_name, commands)
+    data = _run_cli(device_name, commands)
+
+    # Single device: return directly
+    if isinstance(device_name, str):
+        return data[device_name]
+
+    # Multiple devices: data is already dict[str, dict[str, str]]
+    return data
 
 
 _getters_cache: list[GetterInfo] | None = None

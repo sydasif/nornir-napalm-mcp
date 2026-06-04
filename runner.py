@@ -73,92 +73,110 @@ def reset_nornir() -> Nornir | None:
     return previous
 
 
-def _resolve_device(nr: Nornir, device_name: str) -> None:
-    """Validate that a device exists in the Nornir inventory.
+def _resolve_filter(nr: Nornir, device_names: str | list[str]) -> Nornir:
+    """Filter Nornir by a list of device names and validate that all devices exist.
 
     Args:
         nr: The Nornir instance.
-        device_name: Host name to look up.
+        device_names: A single device name or a list of device names.
+
+    Returns:
+        A filtered Nornir instance containing only the specified devices.
 
     Raises:
-        ValueError: If the device is not found in the inventory.
+        ValueError: If any device is not found in the inventory.
     """
-    if device_name not in nr.inventory.hosts:
-        available = ", ".join(sorted(nr.inventory.hosts)) or "(none)"
+    if isinstance(device_names, str):
+        device_names = [device_names]
+
+    # Check that all devices exist
+    nr_filtered = nr.filter(name__in=device_names)
+    available = ", ".join(sorted(nr.inventory.hosts)) or "(none)"
+
+    if len(nr_filtered.inventory.hosts) == 0:
         raise ValueError(
-            f"Device '{device_name}' not found in inventory. "
+            f"No devices found matching {device_names}. "
             f"Available devices: {available}. Call nornir_list_inventory to see the current list."
         )
+    # Ensure we found all requested devices
+    found_names = set(nr_filtered.inventory.hosts.keys())
+    requested_names = set(device_names)
+    if not requested_names.issubset(found_names):
+        missing = requested_names - found_names
+        raise ValueError(
+            f"Following devices not found in inventory: {', '.join(sorted(missing))}. "
+            f"Available devices: {available}."
+        )
+    return nr_filtered
 
 
-def _extract_single_result(result: dict[str, Any], device_name: str) -> dict[str, Any]:
-    """Extract the task result from Nornir's MultiResult for a single host.
+def _extract_multiple_result(result: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """Extract task results from Nornir's MultiResult for multiple hosts.
 
     Args:
         result: The AggregatedResult from nr.run().
-        device_name: The host name key to extract.
 
     Returns:
-        The raw result dict from the task.
+        A dict mapping host name to the result dict.
 
     Raises:
-        RuntimeError: If the task failed, returned no result, or device is missing.
+        RuntimeError: If the task failed, returned no result, or host is missing.
     """
-    if device_name not in result:
-        raise RuntimeError(
-            f"No result returned for '{device_name}'. "
-            "The device may not exist or the filter matched no hosts."
-        )
-    host_result = result[device_name]
-    if not host_result:
-        raise RuntimeError(f"Empty result for '{device_name}'. The task produced no output.")
-    task_result = host_result[0]
-
-    if task_result.failed:
-        raise RuntimeError(f"NAPALM task failed for '{device_name}': {task_result.exception}")
-
-    return cast(dict[str, Any], task_result.result)
+    extracted: dict[str, dict[str, Any]] = {}
+    for host_name, multi_result in result.items():
+        if not multi_result:
+            raise RuntimeError(f"Empty result for '{host_name}'. The task produced no output.")
+        task_result = multi_result[0]
+        if task_result.failed:
+            raise RuntimeError(f"NAPALM task failed for '{host_name}': {task_result.exception}")
+        extracted[host_name] = cast(dict[str, Any], task_result.result)
+    return extracted
 
 
-def _run_getter(device_name: str, getters: list[str]) -> dict[str, Any]:
-    """Filter Nornir to a single host and run napalm_get.
+def _run_getter(device_name: str | list[str], getters: list[str]) -> dict[str, dict[str, Any]]:
+    """Filter Nornir by device name(s) and run napalm_get.
 
     Args:
-        device_name: Exact host name as defined in hosts.yaml.
+        device_name: Exact host name as defined in hosts.yaml, or a list of host names.
         getters: List of NAPALM getters to execute.
 
     Returns:
-        The raw getter dict from the task result.
+        A dict mapping each host name to its raw getter dict.
 
     Raises:
         ValueError: For unknown devices.
         RuntimeError: For connection or task failures.
     """
     nr = _get_nornir()
-    _resolve_device(nr, device_name)
-
-    nr_filtered = nr.filter(name=device_name)
+    nr_filtered = _resolve_filter(nr, device_name)
     result = nr_filtered.run(task=napalm_get, getters=getters)
-    return _extract_single_result(result, device_name)
+    return _extract_multiple_result(result)
 
 
-def _run_cli(device_name: str, commands: list[str]) -> dict[str, str]:
-    """Filter Nornir to a single host and run napalm_cli.
+def _run_cli(device_name: str | list[str], commands: list[str]) -> dict[str, dict[str, str]]:
+    """Filter Nornir by device name(s) and run napalm_cli.
 
     Args:
-        device_name: Exact host name as defined in hosts.yaml.
+        device_name: Exact host name as defined in hosts.yaml, or a list of host names.
         commands: List of CLI commands to execute (must be read-only show commands).
 
     Returns:
-        A dict mapping each command to its output text.
+        A dict mapping each host name to a dict of command outputs.
 
     Raises:
         ValueError: For unknown devices.
         RuntimeError: For connection or task failures.
     """
     nr = _get_nornir()
-    _resolve_device(nr, device_name)
-
-    nr_filtered = nr.filter(name=device_name)
+    nr_filtered = _resolve_filter(nr, device_name)
     result = nr_filtered.run(task=napalm_cli, commands=commands)
-    return cast(dict[str, str], _extract_single_result(result, device_name))
+    # We know the result is dict[str, str] for each host, so we cast accordingly
+    extracted: dict[str, dict[str, str]] = {}
+    for host_name, multi_result in result.items():
+        if not multi_result:
+            raise RuntimeError(f"Empty result for '{host_name}'. The task produced no output.")
+        task_result = multi_result[0]
+        if task_result.failed:
+            raise RuntimeError(f"NAPALM task failed for '{host_name}': {task_result.exception}")
+        extracted[host_name] = cast(dict[str, str], task_result.result)
+    return extracted
