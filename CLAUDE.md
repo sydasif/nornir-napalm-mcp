@@ -38,17 +38,37 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Core Components
 
-**server.py** - Main application file containing:
+**models.py** - Pydantic data models:
 
-- FastMCP server initialization with lazy-loaded Nornir instance
-- Four primary MCP tools:
+- `InventoryDevice` - Device name, hostname, platform, and groups
+- `NetworkFacts` - System facts (hostname, vendor, model, etc.)
+- `NetworkInterfaces` - Interface and IP address data
+- `DeviceConfig` - Running/startup configuration
+- `ReloadSummary` - Inventory reload changes
+- `GetterInfo` - Available NAPALM getters per platform
+
+**runner.py** - Nornir initialization and helper functions:
+
+- `_get_nornir()` - Singleton pattern with lazy initialization
+- `_resolve_config()` - Resolves Nornir config path with env var support
+- `_resolve_device()` - Validates device existence in inventory
+- `_extract_single_result()` - Extracts task results from Nornir
+- `_run_getter()` - Runs NAPALM getters on specific devices
+- `_run_cli()` - Executes CLI commands via NAPALM
+
+**server.py** - FastMCP server and tool definitions:
+
+- FastMCP server initialization
+- Eight MCP tools:
   1. `nornir_list_inventory` - Lists all devices from inventory
-  2. `nornir_get_facts` - Retrieves device system facts (vendor, model, OS, etc.)
+  2. `nornir_get_facts` - Retrieves device system facts
   3. `nornir_get_interfaces` - Gets interface and IP address data
-  4. `nornir_run_getter` - Generic runner for any NAPALM getter (arp_table, vlans, etc.)
-  5. `nornir_reload_inventory` - Reloads YAML inventory files
-- Singleton Nornir pattern: `_get_nornir()` caches instance after first initialization
-- Error handling with meaningful error messages for missing devices or failed getters
+  4. `nornir_run_getter` - Generic NAPALM getter runner
+  5. `nornir_get_config` - Retrieves running/startup configuration
+  6. `nornir_run_cli` - Executes read-only CLI commands
+  7. `nornir_list_getters` - Lists available getters per platform
+  8. `nornir_reload_inventory` - Reloads YAML inventory files
+- Main entry point with transport selection
 
 **Testing Approach** (`tests/` directory):
 
@@ -62,9 +82,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 1. **Lazy Initialization**: Nornir instance is created only when first needed (`_get_nornir()`), allowing server to start even with broken inventory
 2. **Singleton Pattern**: Global `_nornir` variable ensures single Nornir instance reused across requests
 3. **Separation of Concerns**:
-   - MCP tool decorators handle API exposure
-   - Helper functions (`_run_getter`, `_resolve_config`) encapsulate logic
-   - Pydantic models define structured return types
+   - `models.py` defines structured return types
+   - `runner.py` encapsulates Nornir logic and task execution
+   - `server.py` handles MCP API exposure and tool definitions
 4. **Configuration Override**: `NORNIR_CONFIG` environment variable allows custom config paths
 5. **Transport Flexibility**: Supports both STDIO (Claude Desktop) and SSE (network) transports
 

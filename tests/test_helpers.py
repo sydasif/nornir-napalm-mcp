@@ -10,26 +10,27 @@ from collections.abc import Iterator
 
 import pytest
 
+import runner
 import server
 from tests.conftest import FakeGroup, FakeHost, FakeHosts, FakeInventory, FakeNornir
 
 
 @pytest.fixture(autouse=True)
 def _reload_server(fake_nornir: dict[str, FakeHost]) -> Iterator[None]:
-    """Reset server's cached Nornir singleton before each test.
+    """Reset runner's cached Nornir singleton before each test.
 
     Args:
         fake_nornir: The fake inventory fixture.
     """
-    server._nornir = None
+    runner._nornir = None
     yield
-    server._nornir = None
+    runner._nornir = None
 
 
 def test_resolve_config_defaults_to_module_relative(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify config resolution defaults to config.yaml relative to the server module."""
+    """Verify config resolution defaults to config.yaml relative to the runner module."""
     monkeypatch.delenv("NORNIR_CONFIG", raising=False)
-    path = server._resolve_config()
+    path = runner._resolve_config()
     assert path.name == "config.yaml"
     assert path.is_absolute()
 
@@ -39,22 +40,22 @@ def test_resolve_config_honors_env_var(tmp_path, monkeypatch) -> None:
     custom = tmp_path / "custom.yaml"
     custom.write_text("inventory:\n  plugin: SimpleInventory\n")
     monkeypatch.setenv("NORNIR_CONFIG", str(custom))
-    assert server._resolve_config() == custom.resolve()
+    assert runner._resolve_config() == custom.resolve()
 
 
 def test_resolve_config_resolves_relative_paths(tmp_path, monkeypatch) -> None:
     """Verify that relative paths in NORNIR_CONFIG are resolved correctly."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("NORNIR_CONFIG", "config.yaml")
-    resolved = server._resolve_config()
+    resolved = runner._resolve_config()
     assert resolved.is_absolute()
     assert resolved.name == "config.yaml"
 
 
 def test_get_nornir_caches_singleton() -> None:
     """Verify that the Nornir instance is cached after the first initialization."""
-    a = server._get_nornir()
-    b = server._get_nornir()
+    a = runner._get_nornir()
+    b = runner._get_nornir()
     assert a is b
 
 
@@ -77,14 +78,14 @@ def test_list_inventory_sorted() -> None:
 
 def test_run_getter_returns_getter_payload() -> None:
     """Verify that napalm_get returns the expected payload for a valid host."""
-    data = server._run_getter("spine-01", ["facts"])
+    data = runner._run_getter("spine-01", ["facts"])
     assert data == {"facts": {"hostname": "test-host", "vendor": "Arista", "model": "7280R"}}
 
 
 def test_run_getter_validates_device_first() -> None:
     """Verify that _run_getter validates device existence before executing tasks."""
     with pytest.raises(ValueError, match="not found in inventory"):
-        server._run_getter("nope", ["facts"])
+        runner._run_getter("nope", ["facts"])
 
 
 def test_get_network_facts_returns_facts_dict() -> None:
@@ -157,7 +158,7 @@ def test_reload_inventory_detects_added_host(monkeypatch: pytest.MonkeyPatch) ->
     def mock_init(**_) -> FakeNornir:
         return FakeNornir(FakeInventory(FakeHosts(new_hosts)))
 
-    monkeypatch.setattr("server.InitNornir", mock_init)
+    monkeypatch.setattr("runner.InitNornir", mock_init)
     report = server.nornir_reload_inventory()
 
     assert "router-99" in report.current_hosts
@@ -169,9 +170,9 @@ def test_reload_inventory_detects_added_host(monkeypatch: pytest.MonkeyPatch) ->
 def test_reload_inventory_rebuilds_singleton() -> None:
     """Verify that reloading the inventory creates a new Nornir instance."""
     server.nornir_reload_inventory()
-    before = server._nornir
+    before = runner._nornir
     server.nornir_reload_inventory()
-    after = server._nornir
+    after = runner._nornir
     assert before is not None
     assert after is not None
     assert before is not after
