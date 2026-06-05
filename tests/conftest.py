@@ -79,18 +79,25 @@ class FakeNornir:
         name: str | None = None,
         name__in: list[str] | None = None,
         filter_func: Any = None,
+        platform: str | None = None,
     ) -> FakeNornir:
-        """Filter hosts by name or list of names."""
+        """Filter hosts by name, list of names, filter_func, or platform."""
+        filtered = dict(self.inventory.hosts._hosts)
+
         if filter_func is not None:
-            filtered = {k: v for k, v in self.inventory.hosts._hosts.items() if filter_func(v)}
-            return FakeNornir(FakeInventory(FakeHosts(filtered)))
+            filtered = {k: v for k, v in filtered.items() if filter_func(v)}
+
         if name__in is not None:
-            filtered = {k: v for k, v in self.inventory.hosts._hosts.items() if k in name__in}
-            return FakeNornir(FakeInventory(FakeHosts(filtered)))
+            filtered = {k: v for k, v in filtered.items() if k in name__in}
+
         if name is not None:
-            host = self.inventory.hosts.get(name)
-            return FakeNornir(FakeInventory(FakeHosts({name: host}) if host else FakeHosts({})))
-        return self
+            host = filtered.get(name)
+            filtered = {name: host} if host else {}
+
+        if platform is not None:
+            filtered = {k: v for k, v in filtered.items() if v.platform == platform}
+
+        return FakeNornir(FakeInventory(FakeHosts(filtered)))
 
     def run(self, task: Any, **kwargs: Any) -> dict[str, list[Any]]:
         """Run a task against all hosts in the filtered inventory."""
@@ -118,6 +125,18 @@ class FakeNornir:
             result = {cmd: f"Output for: {cmd}" for cmd in commands}
             return {name: [FakeTaskResult(result)] for name in hosts}
 
+        if "dest" in kwargs:
+            result = {
+                "results_sent": kwargs.get("count", 5),
+                "results_received": kwargs.get("count", 5),
+                "packet_loss": 0,
+                "rtt_min": 1.0,
+                "rtt_max": 2.0,
+                "rtt_avg": 1.5,
+                "rtt_stddev": 0.3,
+            }
+            return {name: [FakeTaskResult(result)] for name in hosts}
+
         # Unrecognized task: fail loudly so new task types must be added explicitly
         raise NotImplementedError(
             f"No dispatch for task={task} with kwargs={set(kwargs.keys())}. "
@@ -136,13 +155,13 @@ def _make_host(name: str, hostname: str, platform: str, groups: list[str]) -> Fa
 
 @pytest.fixture
 def fake_nornir(monkeypatch: pytest.MonkeyPatch) -> dict[str, FakeHost]:
-    """Patch server.InitNornir to return a deterministic fake inventory."""
+    """Patch runner.InitNornir to return a deterministic fake inventory."""
     hosts_data = {
         "spine-01": _make_host("spine-01", "192.168.1.1", "eos", ["spine", "datacenter-a"]),
         "leaf-01": _make_host("leaf-01", "192.168.1.11", "eos", ["leaf", "datacenter-a"]),
     }
 
-    def mock_init(**_) -> FakeNornir:
+    def mock_init(**_: object) -> FakeNornir:
         return FakeNornir(FakeInventory(FakeHosts(hosts_data)))
 
     monkeypatch.setattr("runner.InitNornir", mock_init)

@@ -1,424 +1,341 @@
-"""
-Nornir-NAPALM FastMCP Server
-Exposes network device data to AI assistants via NAPALM getters.
-"""
+"""Nornir-NAPALM FastMCP Server."""
 
 import argparse
 import logging
-from operator import attrgetter
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-import napalm
 from fastmcp import FastMCP
-from napalm.base.exceptions import ModuleImportError
 
-from models import (
-    DeviceConfig,
-    GetterInfo,
-    InventoryDevice,
-    NetworkFacts,
-    ReloadSummary,
-)
-from runner import (
-    _get_nornir,
-    _run_cli,
-    _run_getter,
-    reset_nornir,
-)
+from models import GetterInfo, InventoryDevice
+from runner import _get_nornir, reset_nornir
 
-# ---------------------------------------------------------------------------
-# Logging
-# ---------------------------------------------------------------------------
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-)
+if TYPE_CHECKING:
+    from nornir.core import Nornir
+
+logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("nornir-napalm-mcp")
 
-# ---------------------------------------------------------------------------
-# FastMCP initialisation
-# ---------------------------------------------------------------------------
 mcp = FastMCP(
     name="Nornir-NAPALM Server",
-    instructions=(
-        "Query live network device state via NAPALM getters. "
-        "Call nornir_list_inventory first to discover available devices, "
-        "then use the targeted getter tools. All operations are read-only."
-    ),
+    instructions="Query network devices via NAPALM. Call nornir_list_inventory first.",
 )
 
-# ---------------------------------------------------------------------------
-# MCP Tools
-# ---------------------------------------------------------------------------
+
+def _filter_devices(
+    nr: "Nornir",
+    name: str | list[str] | None = None,
+    group: str | None = None,
+    platform: str | None = None,
+) -> "Nornir":
+    """Filters Nornir inventory by name, group, or platform.
+
+    At least one filter parameter should be provided. If no devices match
+    the given filters, a ValueError is raised with available device names.
+
+    Args:
+        nr: The Nornir instance to filter.
+        name: Device name or list of names to filter by.
+        group: Group name to filter by.
+        platform: Platform name to filter by.
+
+    Returns:
+        A filtered Nornir instance containing only matching devices.
+
+    Raises:
+        ValueError: If no devices match the provided filters.
+    """
+    if name:
+        if isinstance(name, str):
+            name = [name]
+        nr = nr.filter(filter_func=lambda h: h.name in name)
+    if group:
+        nr = nr.filter(filter_func=lambda h: group in [g.name for g in h.groups])
+    if platform:
+        nr = nr.filter(platform=platform)
+
+    if not nr.inventory.hosts:
+        available = ", ".join(sorted(_get_nornir().inventory.hosts)) or "(none)"
+        raise ValueError(
+            f"No devices match filters (name={name}, group={group}, platform={platform}). "
+            f"Available devices: {available}. Call nornir_list_inventory."
+        )
+
+    return nr
 
 
 @mcp.tool()
-def nornir_list_inventory(
-    group: str | None = None, platform: str | None = None
-) -> list[InventoryDevice]:
-    """List network devices loaded from the YAML inventory, optionally filtered
-    by group or platform.
-
-    Returns a list of devices with their hostname, platform, and group membership.
-    Always call this first to discover what devices are available.
-
-    Args:
-        group: Optional group name to filter devices.
-        platform: Optional platform name to filter devices.
+def nornir_list_inventory() -> list[InventoryDevice]:
+    """Lists all devices in the Nornir inventory.
 
     Returns:
-        A sorted list of devices.
+        A sorted list of InventoryDevice objects, each containing
+        the device name, hostname, platform, and group membership.
     """
     nr = _get_nornir()
-    devices: list[InventoryDevice] = []
-    for host in nr.inventory.hosts.values():
-        if group is not None and group not in [g.name for g in host.groups]:
-            continue
-        if platform is not None and str(host.platform) != platform:
-            continue
-        devices.append(
-            InventoryDevice(
-                name=host.name,
-                hostname=str(host.hostname),
-                platform=str(host.platform),
-                groups=[g.name for g in host.groups],
-            )
+    return [
+        InventoryDevice(
+            name=host.name,
+            hostname=str(host.hostname),
+            platform=str(host.platform),
+            groups=[g.name for g in host.groups],
         )
-    return sorted(devices, key=attrgetter("name"))
-
-
-def _parse_facts(dev: str, facts_data: Any) -> NetworkFacts:
-    """Parse NAPALM facts data into a NetworkFacts model.
-
-    Args:
-        dev: Device name (for error messages).
-        facts_data: Raw facts data from NAPALM.
-
-    Returns:
-        A structured NetworkFacts object.
-
-    Raises:
-        RuntimeError: If data is None or not a dict.
-    """
-    if facts_data is None:
-        raise RuntimeError(
-            f"NAPALM 'facts' getter returned no data for '{dev}'. "
-            "Check the device connectivity or try nornir_run_getter with a different getter."
-        )
-
-    if not isinstance(facts_data, dict):
-        raise RuntimeError(
-            f"NAPALM 'facts' getter returned unexpected type {type(facts_data).__name__} "
-            f"for '{dev}'. Expected a dict."
-        )
-
-    standard_fields = {"hostname", "vendor", "model", "os_version", "serial_number"}
-    return NetworkFacts(
-        **{k: v for k, v in facts_data.items() if k in standard_fields},
-        additional_facts={k: v for k, v in facts_data.items() if k not in standard_fields},
-    )
-
-
-def _parse_config(dev: str, config_data: Any, config_type: str) -> DeviceConfig:
-    """Parse NAPALM config data into a DeviceConfig model.
-
-    Args:
-        dev: Device name (for error messages).
-        config_data: Raw config data from NAPALM.
-        config_type: Which config to extract ('running', 'startup', or 'both').
-
-    Returns:
-        A DeviceConfig object.
-
-    Raises:
-        RuntimeError: If data is None or not a dict.
-    """
-    if config_data is None:
-        raise RuntimeError(
-            f"NAPALM 'config' getter returned no data for '{dev}'. Check device connectivity."
-        )
-
-    if not isinstance(config_data, dict):
-        raise RuntimeError(
-            f"NAPALM 'config' getter returned unexpected type {type(config_data).__name__} "
-            f"for '{dev}'. Expected a dict."
-        )
-
-    running = config_data.get("running") if config_type in ("running", "both") else None
-    startup = config_data.get("startup") if config_type in ("startup", "both") else None
-    return DeviceConfig(running=running, startup=startup)
+        for host in sorted(nr.inventory.hosts.values(), key=lambda h: h.name)
+    ]
 
 
 @mcp.tool()
-def nornir_get_facts(device_name: str | list[str]) -> NetworkFacts | dict[str, NetworkFacts]:
-    """Fetch system facts for a specific device or list of devices.
+def nornir_get_facts(
+    name: str | list[str] | None = None,
+    group: str | None = None,
+    platform: str | None = None,
+) -> dict[str, Any]:
+    """Retrieves system facts from network device(s) via NAPALM.
+
+    Fetches device information such as hostname, vendor, model,
+    OS version, and serial number.
 
     Args:
-        device_name: Exact host name as defined in hosts.yaml (case-sensitive),
-                     or a list of host names.
+        name: Device name or list of names to query.
+        group: Group name to filter devices by.
+        platform: Platform name to filter devices by.
 
     Returns:
-        A structured NetworkFacts object for a single device, or a dict mapping
-        device names to NetworkFacts objects for multiple devices.
+        A dictionary mapping each device name to its facts dictionary
+        containing hostname, vendor, model, os_version, and serial_number.
 
     Raises:
-        RuntimeError: If the 'facts' getter returns no data.
-        ValueError: If device is not found in inventory.
+        ValueError: If no devices match the provided filters.
     """
-    data = _run_getter(device_name, ["facts"])
+    from nornir_napalm.plugins.tasks import napalm_get
 
-    # Single device: return directly
-    if isinstance(device_name, str):
-        return _parse_facts(device_name, data[device_name].get("facts"))
-
-    # Multiple devices: extract per-device
-    return {dev: _parse_facts(dev, dev_data.get("facts")) for dev, dev_data in data.items()}
+    nr = _filter_devices(_get_nornir(), name=name, group=group, platform=platform)
+    result = nr.run(task=napalm_get, getters=["facts"])
+    return {host: task[0].result for host, task in result.items()}
 
 
 @mcp.tool()
 def nornir_run_getter(
-    device_name: str | list[str],
     getter: str,
+    name: str | list[str] | None = None,
+    group: str | None = None,
+    platform: str | None = None,
     getter_options: dict[str, Any] | None = None,
-    timeout: int | None = None,
-) -> Any | dict[str, Any]:
-    """Run any supported NAPALM getter on a specific device or list of devices.
+) -> dict[str, Any]:
+    """Runs any supported NAPALM getter on network device(s).
 
-    Supports per-getter options (e.g., for 'config' you can pass
-    getter_options={"retrieve": "startup"}) and an optional connection timeout.
-
-    Useful for getters not covered by dedicated tools (e.g., 'arp_table', 'vlans').
+    Supports all standard NAPALM getters including arp_table, interfaces,
+    routes, vlans, and more. Use nornir_list_getters to discover available
+    getters for each platform.
 
     Args:
-        device_name: Exact host name as defined in hosts.yaml (case-sensitive),
-                     or a list of host names.
-        getter: NAPALM getter name (without the "get_" prefix).
-        getter_options: Optional dict of getter-specific parameters.
-        timeout: Optional per-call timeout in seconds (overrides global).
+        getter: NAPALM getter name (e.g., 'arp_table', 'interfaces').
+        name: Device name or list of names to query.
+        group: Group name to filter devices by.
+        platform: Platform name to filter devices by.
+        getter_options: Optional getter-specific parameters passed to NAPALM.
 
     Returns:
-        The result of the NAPALM getter for a single device, or a dict mapping
-        device names to their getter results for multiple devices.
+        A dictionary mapping each device name to the getter result.
 
     Raises:
-        ValueError: If the getter name contains invalid characters.
-        RuntimeError: If the getter key is missing from the response.
+        ValueError: If no devices match the provided filters.
     """
-    if not getter.replace("_", "").isalnum():
-        raise ValueError(
-            f"Invalid getter name '{getter}'. "
-            "Use lowercase letters, digits, and underscores only (e.g. 'arp_table')."
-        )
+    from nornir_napalm.plugins.tasks import napalm_get
+
+    nr = _filter_devices(_get_nornir(), name=name, group=group, platform=platform)
 
     g_opts = {getter: getter_options} if getter_options else None
-    optional_args = {"timeout": timeout} if timeout else None
-    data = _run_getter(device_name, [getter], getters_options=g_opts, optional_args=optional_args)
-
-    # Single device: return directly
-    if isinstance(device_name, str):
-        dev_data = data[device_name]
-        if getter not in dev_data:
-            raise RuntimeError(
-                f"NAPALM getter '{getter}' returned unexpected response structure "
-                f"for '{device_name}'. Expected key '{getter}' not found in result."
-            )
-        return dev_data[getter]
-
-    # Multiple devices: extract per-device
-    results: dict[str, Any] = {}
-    for dev, dev_data in data.items():
-        if getter not in dev_data:
-            raise RuntimeError(
-                f"NAPALM getter '{getter}' returned unexpected response structure "
-                f"for '{dev}'. Expected key '{getter}' not found in result."
-            )
-        results[dev] = dev_data[getter]
-    return results
+    result = nr.run(task=napalm_get, getters=[getter], getters_options=g_opts)
+    return {host: task[0].result for host, task in result.items()}
 
 
 @mcp.tool()
 def nornir_get_config(
-    device_name: str | list[str],
-    config_type: str = "both",
-) -> DeviceConfig | dict[str, DeviceConfig]:
-    """Retrieve the running and/or startup configuration from a device or list of devices.
+    name: str | list[str] | None = None,
+    group: str | None = None,
+    platform: str | None = None,
+    retrieve: str = "all",
+    full: bool = False,
+    sanitized: bool = False,
+    format: str = "text",
+) -> dict[str, Any]:
+    """Retrieves device configuration from network device(s).
 
-    Uses NAPALM's get_config getter to fetch configuration files. Note that
-    configuration output may contain sensitive information such as passwords
-    or community strings.
+    Fetches running and/or startup configuration using NAPALM's config getter.
 
     Args:
-        device_name: Exact host name as defined in hosts.yaml (case-sensitive),
-                     or a list of host names.
-        config_type: Which config to retrieve — 'running', 'startup', or 'both' (default).
+        name: Device name or list of names to query.
+        group: Group name to filter devices by.
+        platform: Platform name to filter devices by.
+        retrieve: Which config to retrieve — 'running', 'startup', or 'all'.
+        full: If True, return the full configuration without filtering.
+        sanitized: If True, remove sensitive data from the output.
+        format: Configuration format — 'text' or 'json'.
 
     Returns:
-        A DeviceConfig object with running and/or startup configuration text for a single device,
-        or a dict mapping device names to DeviceConfig objects for multiple devices.
+        A dictionary mapping each device name to its configuration data
+        containing 'running' and/or 'startup' keys.
 
     Raises:
-        ValueError: If config_type is not one of 'running', 'startup', or 'both'.
-        RuntimeError: If the config getter returns no data.
+        ValueError: If no devices match the provided filters.
     """
-    valid_types = {"running", "startup", "both"}
-    if config_type not in valid_types:
-        raise ValueError(
-            f"Invalid config_type '{config_type}'. "
-            f"Must be one of: {', '.join(sorted(valid_types))}."
-        )
+    from nornir_napalm.plugins.tasks import napalm_get
 
-    data = _run_getter(device_name, ["config"])
+    nr = _filter_devices(_get_nornir(), name=name, group=group, platform=platform)
 
-    # Single device: return directly
-    if isinstance(device_name, str):
-        return _parse_config(device_name, data[device_name].get("config"), config_type)
-
-    # Multiple devices: extract per-device
-    return {
-        dev: _parse_config(dev, dev_data.get("config"), config_type)
-        for dev, dev_data in data.items()
+    getter_options = {
+        "config": {
+            "retrieve": retrieve,
+            "full": full,
+            "sanitized": sanitized,
+            "format": format,
+        }
     }
+
+    result = nr.run(task=napalm_get, getters=["config"], getters_options=getter_options)
+    return {host: task[0].result for host, task in result.items()}
 
 
 @mcp.tool()
 def nornir_run_cli(
-    device_name: str | list[str], commands: list[str]
-) -> dict[str, str] | dict[str, dict[str, str]]:
-    """Execute read-only CLI commands on a device or list of devices and return their output.
+    commands: list[str],
+    name: str | list[str] | None = None,
+    group: str | None = None,
+    platform: str | None = None,
+) -> dict[str, Any]:
+    """Executes CLI commands on network device(s) via NAPALM.
 
-    Sends operational commands (e.g., 'show ip interface brief') via NAPALM's
-    cli() method. Only 'show' commands are permitted for safety — configuration
-    commands are rejected.
+    Sends operational commands (e.g., 'show version') to devices and
+    returns their output. Use only read-only commands for safety.
 
     Args:
-        device_name: Exact host name as defined in hosts.yaml (case-sensitive),
-                     or a list of host names.
-        commands: List of CLI commands to execute (must start with 'show').
+        commands: List of CLI commands to execute on the devices.
+        name: Device name or list of names to target.
+        group: Group name to filter devices by.
+        platform: Platform name to filter devices by.
 
     Returns:
-        A dict mapping each command string to its output text for a single device,
-        or a dict mapping device names to dicts of command outputs for multiple devices.
+        A dictionary mapping each device name to a dict of
+        command-to-output mappings.
 
     Raises:
-        ValueError: If any command does not start with 'show', or device not found.
-        RuntimeError: For connection or task failures.
+        ValueError: If no devices match the provided filters.
     """
-    if not commands:
-        raise ValueError("No commands provided. Pass at least one 'show' command.")
+    from nornir_napalm.plugins.tasks import napalm_cli
 
-    for cmd in commands:
-        if not cmd.strip().lower().startswith("show"):
-            raise ValueError(
-                f"Command '{cmd}' is not a read-only show command. "
-                "Only 'show' commands are permitted for safety."
-            )
-
-    data = _run_cli(device_name, commands)
-
-    # Single device: return directly
-    if isinstance(device_name, str):
-        return data[device_name]
-
-    # Multiple devices: data is already dict[str, dict[str, str]]
-    return data
+    nr = _filter_devices(_get_nornir(), name=name, group=group, platform=platform)
+    result = nr.run(task=napalm_cli, commands=commands)
+    return {host: task[0].result for host, task in result.items()}
 
 
-_getters_cache: list[GetterInfo] | None = None
+@mcp.tool()
+def nornir_ping(
+    destination: str,
+    name: str | list[str] | None = None,
+    group: str | None = None,
+    platform: str | None = None,
+    source: str = "",
+    ttl: int = 255,
+    timeout: int = 2,
+    size: int = 100,
+    count: int = 5,
+    vrf: str = "",
+) -> dict[str, Any]:
+    """Sends ICMP ping from network device(s) to a destination.
+
+    Executes ping from the device itself (not from the MCP server) to test
+    network reachability between the device and the target destination.
+
+    Args:
+        destination: IP address or hostname to ping.
+        name: Device name or list of names to ping from.
+        group: Group name to filter devices by.
+        platform: Platform name to filter devices by.
+        source: Source IP address or interface to ping from.
+        ttl: Time-to-live value for ICMP packets.
+        timeout: Timeout in seconds for each ping attempt.
+        size: ICMP packet size in bytes.
+        count: Number of ping packets to send.
+        vrf: VRF name to ping within (for devices supporting VRFs).
+
+    Returns:
+        A dictionary mapping each device name to ping results including
+        packets sent, received, loss percentage, and RTT statistics.
+
+    Raises:
+        ValueError: If no devices match the provided filters.
+    """
+    from nornir_napalm.plugins.tasks import napalm_ping
+
+    nr = _filter_devices(_get_nornir(), name=name, group=group, platform=platform)
+
+    result = nr.run(
+        task=napalm_ping,
+        dest=destination,
+        source=source,
+        ttl=ttl,
+        timeout=timeout,
+        size=size,
+        count=count,
+        vrf=vrf,
+    )
+    return {host: task[0].result for host, task in result.items()}
 
 
 @mcp.tool()
 def nornir_list_getters() -> list[GetterInfo]:
-    """List available NAPALM getters for each platform in the inventory.
+    """Lists available NAPALM getters for each platform in the inventory.
 
-    Introspects the NAPALM driver for each unique platform to discover which
-    getters are supported. No device connection is required — this is instant.
-    Results are cached until nornir_reload_inventory is called.
+    Introspects the NAPALM driver for each unique platform to discover
+    which getters are supported. No device connection is required.
 
     Returns:
-        A list of GetterInfo objects, one per platform found in the inventory.
+        A list of GetterInfo objects, one per platform, each containing
+        the platform name and a sorted list of available getter names.
     """
-    global _getters_cache
-    if _getters_cache is not None:
-        return _getters_cache
+    import napalm
 
     nr = _get_nornir()
     platforms = {str(host.platform) for host in nr.inventory.hosts.values()}
 
-    results: list[GetterInfo] = []
+    results = []
     for platform in sorted(platforms):
         try:
             driver = napalm.get_network_driver(platform)
-            # Introspect the driver class for get_* methods
             getters = sorted(
                 name.removeprefix("get_")
                 for name in dir(driver)
                 if name.startswith("get_") and callable(getattr(driver, name))
             )
-        except Exception as exc:
-            if not isinstance(exc, (ModuleNotFoundError, TypeError, ModuleImportError)):
-                raise
-            log.warning("Could not introspect NAPALM driver for platform '%s'", platform)
+        except Exception:
+            log.warning("Could not introspect driver for platform '%s'", platform)
             getters = []
         results.append(GetterInfo(platform=platform, getters=getters))
 
-    _getters_cache = results
     return results
 
 
 @mcp.tool()
-def nornir_reload_inventory() -> ReloadSummary:
-    """Reload the network inventory from disk.
+def nornir_reload_inventory() -> None:
+    """Reloads the network inventory from disk.
 
     Discards the in-memory inventory cache and re-reads YAML files.
-    Use after editing the inventory files.
-
-    Returns:
-        A structured ReloadSummary containing added, removed, and total hosts.
+    Use after editing the inventory files to pick up changes.
     """
-    global _getters_cache
-    previous_nornir = reset_nornir()
-    previous = sorted(previous_nornir.inventory.hosts) if previous_nornir is not None else []
-    _getters_cache = None
-
-    rebuilt = _get_nornir()
-    current = sorted(rebuilt.inventory.hosts)
-    return ReloadSummary(
-        previous_hosts=previous,
-        current_hosts=current,
-        added=sorted(set(current) - set(previous)),
-        removed=sorted(set(previous) - set(current)),
-        total=len(current),
-    )
-
-
-# ---------------------------------------------------------------------------
-# Entry point
-# ---------------------------------------------------------------------------
+    reset_nornir()
 
 
 def main() -> None:
-    """Entry point for the nornir-napalm-mcp CLI."""
-
-    parser = argparse.ArgumentParser(description="Nornir-NAPALM FastMCP Server")
-    parser.add_argument(
-        "--transport",
-        choices=["stdio", "http"],
-        default="stdio",
-        help="MCP transport (default: stdio for Claude Desktop)",
-    )
-    parser.add_argument("--host", default="127.0.0.1", help="HTTP bind host (default: 127.0.0.1)")
-    parser.add_argument("--port", type=int, default=8000, help="HTTP bind port")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--transport", choices=["stdio", "http"], default="stdio")
+    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--port", type=int, default=8000)
     args = parser.parse_args()
 
-    match args.transport:
-        case "http":
-            log.info("Starting HTTP server on %s:%d", args.host, args.port)
-            mcp.run(transport="http", host=args.host, port=args.port)
-        case "stdio":
-            log.info("Starting STDIO server (Claude Desktop mode)")
-            mcp.run(transport="stdio")
-        case _:  # pragma: no cover
-            pass
+    if args.transport == "http":
+        mcp.run(transport="http", host=args.host, port=args.port)
+    else:
+        mcp.run(transport="stdio")
 
 
 if __name__ == "__main__":
