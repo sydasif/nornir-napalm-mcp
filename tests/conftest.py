@@ -118,19 +118,6 @@ class FakeNornir:
             result = {cmd: f"Output for: {cmd}" for cmd in commands}
             return {name: [FakeTaskResult(result)] for name in hosts}
 
-        # Dispatch ping tasks by the presence of the dest kwarg
-        if "dest" in kwargs:
-            ping_result = {
-                "success": {
-                    "packets_sent": 5,
-                    "packets_received": 5,
-                    "rtt_min": 1.0,
-                    "rtt_max": 3.0,
-                    "rtt_avg": 2.0,
-                }
-            }
-            return {name: [FakeTaskResult(result=ping_result)] for name in hosts}
-
         # Unrecognized task: fail loudly so new task types must be added explicitly
         raise NotImplementedError(
             f"No dispatch for task={task} with kwargs={set(kwargs.keys())}. "

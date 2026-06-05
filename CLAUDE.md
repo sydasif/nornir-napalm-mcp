@@ -42,7 +42,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - `InventoryDevice` - Device name, hostname, platform, and groups
 - `NetworkFacts` - System facts (hostname, vendor, model, etc.)
-- `NetworkInterfaces` - Interface and IP address data
 - `DeviceConfig` - Running/startup configuration
 - `ReloadSummary` - Inventory reload changes
 - `GetterInfo` - Available NAPALM getters per platform
@@ -51,23 +50,22 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - `_get_nornir()` - Singleton pattern with lazy initialization
 - `_resolve_config()` - Resolves Nornir config path with env var support
-- `_resolve_device()` - Validates device existence in inventory
-- `_extract_single_result()` - Extracts task results from Nornir
+- `_resolve_filter()` - Validates device existence in inventory
+- `_extract_multiple_result()` - Extracts task results from Nornir
 - `_run_getter()` - Runs NAPALM getters on specific devices
 - `_run_cli()` - Executes CLI commands via NAPALM
 
 **server.py** - FastMCP server and tool definitions:
 
 - FastMCP server initialization
-- Eight MCP tools:
+- Seven MCP tools:
   1. `nornir_list_inventory` - Lists all devices from inventory
   2. `nornir_get_facts` - Retrieves device system facts
-  3. `nornir_get_interfaces` - Gets interface and IP address data
-  4. `nornir_run_getter` - Generic NAPALM getter runner
-  5. `nornir_get_config` - Retrieves running/startup configuration
-  6. `nornir_run_cli` - Executes read-only CLI commands
-  7. `nornir_list_getters` - Lists available getters per platform
-  8. `nornir_reload_inventory` - Reloads YAML inventory files
+  3. `nornir_run_getter` - Generic NAPALM getter runner
+  4. `nornir_get_config` - Retrieves running/startup configuration
+  5. `nornir_run_cli` - Executes read-only CLI commands
+  6. `nornir_list_getters` - Lists available getters per platform
+  7. `nornir_reload_inventory` - Reloads YAML inventory files
 - Main entry point with transport selection
 
 **Testing Approach** (`tests/` directory):

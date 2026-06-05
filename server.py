@@ -10,21 +10,19 @@ from typing import Any
 
 import napalm
 from fastmcp import FastMCP
+from napalm.base.exceptions import ModuleImportError
 
 from models import (
     DeviceConfig,
     GetterInfo,
     InventoryDevice,
     NetworkFacts,
-    NetworkInterfaces,
-    PingResult,
     ReloadSummary,
 )
 from runner import (
     _get_nornir,
     _run_cli,
     _run_getter,
-    _run_ping,
     reset_nornir,
 )
 
@@ -175,40 +173,6 @@ def nornir_get_facts(device_name: str | list[str]) -> NetworkFacts | dict[str, N
 
     # Multiple devices: extract per-device
     return {dev: _parse_facts(dev, dev_data.get("facts")) for dev, dev_data in data.items()}
-
-
-@mcp.tool()
-def nornir_get_interfaces(
-    device_name: str | list[str],
-) -> NetworkInterfaces | dict[str, NetworkInterfaces]:
-    """Fetch interface details and IP address assignments for a specific device or list of devices.
-
-    Args:
-        device_name: Exact host name as defined in hosts.yaml (case-sensitive),
-                     or a list of host names.
-
-    Returns:
-        A structured NetworkInterfaces object for a single device, or a dict mapping
-        device names to NetworkInterfaces objects for multiple devices.
-    """
-    data = _run_getter(device_name, ["interfaces", "interfaces_ip"])
-
-    # Single device: return directly
-    if isinstance(device_name, str):
-        dev_data = data[device_name]
-        return NetworkInterfaces(
-            interfaces=dev_data.get("interfaces", {}),
-            interfaces_ip=dev_data.get("interfaces_ip", {}),
-        )
-
-    # Multiple devices: extract per-device
-    return {
-        dev: NetworkInterfaces(
-            interfaces=dev_data.get("interfaces", {}),
-            interfaces_ip=dev_data.get("interfaces_ip", {}),
-        )
-        for dev, dev_data in data.items()
-    }
 
 
 @mcp.tool()
@@ -391,10 +355,7 @@ def nornir_list_getters() -> list[GetterInfo]:
                 if name.startswith("get_") and callable(getattr(driver, name))
             )
         except Exception as exc:
-            if (
-                not isinstance(exc, (ModuleNotFoundError, TypeError))
-                and not type(exc).__name__ == "ModuleImportError"
-            ):
+            if not isinstance(exc, (ModuleNotFoundError, TypeError, ModuleImportError)):
                 raise
             log.warning("Could not introspect NAPALM driver for platform '%s'", platform)
             getters = []
@@ -428,41 +389,6 @@ def nornir_reload_inventory() -> ReloadSummary:
         removed=sorted(set(previous) - set(current)),
         total=len(current),
     )
-
-
-@mcp.tool()
-def nornir_run_ping(
-    dest: str,
-    device_name: str | list[str],
-    count: int = 5,
-    timeout: int = 2,
-    size: int = 100,
-    source: str | None = None,
-    vrf: str | None = None,
-    ttl: int | None = None,
-) -> PingResult | dict[str, PingResult]:
-    """Send ICMP ping from a device or list of devices to a destination.
-
-    Args:
-        dest: Destination IP address or hostname.
-        device_name: Exact host name(s) as defined in hosts.yaml.
-        count: Number of packets to send (default: 5).
-        timeout: Timeout in seconds for each reply (default: 2).
-        size: ICMP packet size in bytes (default: 100).
-        source: Source IP address (optional).
-        vrf: VRF name (optional).
-        ttl: Time-to-live value (optional).
-
-    Returns:
-        For a single device: a PingResult.
-        For multiple devices: a dict mapping device name to PingResult.
-    """
-    raw = _run_ping(device_name, dest, count, timeout, size, source, vrf, ttl)
-
-    if isinstance(device_name, str):
-        return PingResult.from_napalm(dest, raw[device_name])
-
-    return {dev: PingResult.from_napalm(dest, data) for dev, data in raw.items()}
 
 
 # ---------------------------------------------------------------------------

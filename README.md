@@ -12,7 +12,6 @@ All operations are **read-only** — no configuration push is exposed.
 | ------------------------- | --------------------------------------------------------------------------- |
 | `nornir_list_inventory`   | List all devices with hostname, platform, and group membership              |
 | `nornir_get_facts`        | System facts: vendor, model, OS version, serial number                      |
-| `nornir_get_interfaces`   | Interface state and IP address assignments                                  |
 | `nornir_run_getter`       | Run any NAPALM getter by name (`arp_table`, `bgp_neighbors`, `vlans`, etc.) |
 | `nornir_get_config`       | Retrieve running and/or startup configuration from a device                 |
 | `nornir_run_cli`          | Execute read-only `show` commands via NAPALM's CLI method                   |

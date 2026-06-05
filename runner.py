@@ -8,7 +8,7 @@ from typing import Any, cast
 
 from nornir import InitNornir
 from nornir.core import Nornir
-from nornir_napalm.plugins.tasks import napalm_cli, napalm_get, napalm_ping
+from nornir_napalm.plugins.tasks import napalm_cli, napalm_get
 
 log = logging.getLogger("nornir-napalm-mcp")
 
@@ -195,47 +195,3 @@ def _run_cli(device_name: str | list[str], commands: list[str]) -> dict[str, dic
         RuntimeError: For connection or task failures.
     """
     return cast(dict[str, dict[str, str]], _run_task(device_name, napalm_cli, commands=commands))
-
-
-def _run_ping(
-    device_name: str | list[str],
-    dest: str,
-    count: int,
-    timeout: int,
-    size: int,
-    source: str | None = None,
-    vrf: str | None = None,
-    ttl: int | None = None,
-) -> dict[str, dict[str, Any]]:
-    """Filter Nornir by device name(s) and run napalm_ping.
-
-    Args:
-        device_name: Exact host name(s) as defined in hosts.yaml.
-        dest: Destination IP or hostname.
-        count: Number of ICMP packets to send.
-        timeout: Timeout in seconds for each reply.
-        size: ICMP packet size in bytes.
-        source: Source IP address (optional).
-        vrf: VRF name (optional).
-        ttl: Time-to-live value (optional).
-
-    Returns:
-        A dict mapping each host name to the raw ping result dict.
-
-    Raises:
-        ValueError: For unknown devices.
-        RuntimeError: For connection or task failures.
-    """
-    kwargs: dict[str, Any] = {
-        "dest": dest,
-        "count": count,
-        "timeout": timeout,
-        "size": size,
-    }
-    if source is not None:
-        kwargs["source"] = source
-    if vrf is not None:
-        kwargs["vrf"] = vrf
-    if ttl is not None:
-        kwargs["ttl"] = ttl
-    return _run_task(device_name, napalm_ping, **kwargs)

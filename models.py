@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator
 
 
 class InventoryDevice(BaseModel):
@@ -33,13 +33,6 @@ class NetworkFacts(BaseModel):
         return str(v)
 
 
-class NetworkInterfaces(BaseModel):
-    """Interface and IP address data for a network device."""
-
-    interfaces: dict[str, Any] = Field(default_factory=dict)
-    interfaces_ip: dict[str, Any] = Field(default_factory=dict)
-
-
 class DeviceConfig(BaseModel):
     """Running and/or startup configuration for a network device."""
 
@@ -62,77 +55,3 @@ class GetterInfo(BaseModel):
 
     platform: str
     getters: list[str]
-
-
-class PingStats(BaseModel):
-    """Statistics from a single ping attempt."""
-
-    packets_sent: int
-    packets_received: int
-    rtt_min: float | None = None
-    rtt_max: float | None = None
-    rtt_avg: float | None = None
-    packet_loss: float | None = None
-
-    @model_validator(mode="after")
-    def compute_loss(self) -> "PingStats":
-        """Calculate packet loss percentage if not directly provided."""
-        if self.packet_loss is None and self.packets_sent > 0:
-            self.packet_loss = max(
-                0.0,
-                round(((self.packets_sent - self.packets_received) / self.packets_sent) * 100, 2),
-            )
-        return self
-
-
-class PingResult(BaseModel):
-    """Result of a ping operation from a network device."""
-
-    destination: str
-    success: bool
-    stats: PingStats | None = None
-    error: str | None = None
-
-    @classmethod
-    def from_napalm(cls, destination: str, data: dict[str, Any]) -> "PingResult":
-        """Factory method to create a PingResult from raw NAPALM data."""
-        # Check error first: any response with an error key is a failure,
-        # even if a success key is also present (C14).
-        if "error" in data:
-            return cls(
-                destination=destination,
-                success=False,
-                error=data.get("error", "Unknown ping failure"),
-            )
-
-        # Validate success payload is a dict before indexing (C1).
-        success_data = data.get("success")
-        if not isinstance(success_data, dict):
-            return cls(
-                destination=destination,
-                success=False,
-                error=f"Unexpected ping response: {type(success_data).__name__}",
-            )
-
-        # NAPALM drivers use inconsistent key names across platforms:
-        # - Arista EOS: packets_sent, packets_received
-        # - Cisco IOS / most drivers: probes_sent, packet_loss
-        probes_sent = success_data.get("probes_sent", success_data.get("packets_sent", 0))
-        nloss = success_data.get("packet_loss")
-        if nloss is not None and probes_sent > 0:
-            packets_received = probes_sent - int(nloss)
-        else:
-            packets_received = success_data.get("packets_received", 0)
-
-        return cls(
-            destination=destination,
-            success=True,
-            stats=PingStats(
-                packets_sent=probes_sent,
-                packets_received=packets_received,
-                # Don't pass raw count — let compute_loss validator derive percentage
-                rtt_min=success_data.get("rtt_min"),
-                rtt_max=success_data.get("rtt_max"),
-                rtt_avg=success_data.get("rtt_avg"),
-            ),
-        )

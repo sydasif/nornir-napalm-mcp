@@ -99,14 +99,6 @@ def test_get_network_facts_returns_facts_dict() -> None:
     assert facts.additional_facts == {}
 
 
-def test_get_network_interfaces_merges_keys() -> None:
-    """Verify the get_network_interfaces tool returns distinct data per getter."""
-    out = server.nornir_get_interfaces("leaf-01")
-    assert out.interfaces == {"Ethernet1": {"state": "up", "speed": "1000"}}
-    assert out.interfaces_ip == {"Ethernet1": {"ipv4": {"10.0.0.1/24": {}}}}
-    assert out.interfaces != out.interfaces_ip
-
-
 def test_run_napalm_getter_rejects_invalid_name() -> None:
     """Verify that run_napalm_getter rejects getter names with invalid characters."""
     with pytest.raises(ValueError, match="Invalid getter name"):
@@ -516,15 +508,6 @@ def test_nornir_get_facts_batch() -> None:
         assert facts.vendor == "Arista"
 
 
-def test_nornir_get_interfaces_batch() -> None:
-    """Verify nornir_get_interfaces with list returns dict of NetworkInterfaces."""
-    result = server.nornir_get_interfaces(["spine-01", "leaf-01"])
-    assert isinstance(result, dict)
-    assert set(result.keys()) == {"spine-01", "leaf-01"}
-    for interfaces in result.values():
-        assert "Ethernet1" in interfaces.interfaces
-
-
 def test_nornir_run_getter_batch() -> None:
     """Verify nornir_run_getter with list returns dict of results."""
     result = server.nornir_run_getter(["spine-01", "leaf-01"], "arp_table")
@@ -584,102 +567,6 @@ def test_list_inventory_filter_by_both() -> None:
     devices = server.nornir_list_inventory(group="leaf", platform="eos")
     assert len(devices) == 1
     assert devices[0].name == "leaf-01"
-
-
-# ---------------------------------------------------------------------------
-# nornir_run_ping
-# ---------------------------------------------------------------------------
-
-
-def test_run_ping_success() -> None:
-    """Verify nornir_run_ping returns PingResult with stats on success."""
-    result = server.nornir_run_ping(dest="10.0.0.1", device_name="spine-01")
-    assert isinstance(result, dict) is False
-    assert result.destination == "10.0.0.1"
-    assert result.success is True
-    assert result.stats is not None
-    assert result.stats.packets_sent == 5
-    assert result.stats.packets_received == 5
-    assert result.error is None
-
-
-def test_run_ping_batch() -> None:
-    """Verify nornir_run_ping with list returns dict of PingResults."""
-    result = server.nornir_run_ping(dest="10.0.0.1", device_name=["spine-01", "leaf-01"])
-    assert isinstance(result, dict)
-    assert set(result.keys()) == {"spine-01", "leaf-01"}
-    for ping in result.values():
-        assert ping.success is True
-        assert ping.stats is not None
-
-
-def test_run_ping_unknown_device() -> None:
-    """Verify nornir_run_ping raises ValueError for unknown device."""
-    with pytest.raises(ValueError, match="No devices found matching"):
-        server.nornir_run_ping(dest="10.0.0.1", device_name="nonexistent")
-
-
-def test_run_ping_failure(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify nornir_run_ping returns PingResult with error on failure."""
-    from tests.conftest import FakeTaskResult
-
-    def mock_run(self, **_):
-        hosts = self.inventory.hosts._hosts
-        name = next(iter(hosts))
-        return {name: [FakeTaskResult(result={"error": "Timeout"})]}
-
-    monkeypatch.setattr("tests.conftest.FakeNornir.run", mock_run)
-    runner._nornir = None
-    result = server.nornir_run_ping(dest="10.0.0.1", device_name="spine-01")
-    assert result.success is False
-    assert result.error == "Timeout"
-    assert result.stats is None
-
-
-def test_ping_stats_auto_compute_loss() -> None:
-    """Verify PingStats computes packet_loss when omitted."""
-    from models import PingStats
-
-    stats = PingStats(packets_sent=10, packets_received=7)
-    assert stats.packet_loss == 30.0
-
-
-def test_ping_stats_explicit_loss_preserved() -> None:
-    """Verify PingStats preserves explicit packet_loss value."""
-    from models import PingStats
-
-    stats = PingStats(packets_sent=10, packets_received=7, packet_loss=50.0)
-    assert stats.packet_loss == 50.0
-
-
-def test_ping_result_parse_napalm_stats() -> None:
-    """Verify PingResult parses NAPALM-style success dict into PingStats."""
-    from models import PingResult
-
-    result = PingResult(
-        destination="10.0.0.1",
-        success=True,
-        stats={
-            "packets_sent": 5,
-            "packets_received": 5,
-            "rtt_min": 1.0,
-            "rtt_max": 3.0,
-            "rtt_avg": 2.0,
-        },
-    )
-    assert result.stats is not None
-    assert result.stats.rtt_min == 1.0
-    assert result.stats.rtt_avg == 2.0
-    assert result.stats.packets_sent == 5
-
-
-def test_ping_result_no_stats_on_failure() -> None:
-    """Verify PingResult has no stats when NAPALM returns error dict."""
-    from models import PingResult
-
-    result = PingResult(destination="10.0.0.1", success=False, error="unreachable")
-    assert result.stats is None
-    assert result.error == "unreachable"
 
 
 # ---------------------------------------------------------------------------
