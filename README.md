@@ -14,13 +14,14 @@ All operations are **read-only** — no configuration push is exposed.
 | `nornir_get_facts`        | System facts: vendor, model, OS version, serial number                      |
 | `nornir_run_getter`       | Run any NAPALM getter by name (`arp_table`, `bgp_neighbors`, `vlans`, etc.) |
 | `nornir_get_config`       | Retrieve running and/or startup configuration from a device                 |
-| `nornir_run_cli`          | Execute read-only `show` commands via NAPALM's CLI method                   |
+| `nornir_run_cli`          | Execute read-only CLI commands via NAPALM's CLI method                      |
+| `nornir_ping`             | Send ICMP ping from device(s) to test network reachability                  |
 | `nornir_list_getters`     | Introspect available NAPALM getters for each platform in the inventory      |
-| `nornir_reload_inventory` | Re-read YAML inventory from disk with add/remove diff                       |
+| `nornir_reload_inventory` | Re-read YAML inventory from disk                                            |
 
 - **Lazy initialization** — server starts even with a broken inventory, exposing the tool catalogue for inspection.
 - **Singleton caching** — Nornir instance is initialized once and reused across requests.
-- **Pydantic return types** — structured output serialized automatically by FastMCP.
+- **Flexible filtering** — filter by device name, group, or platform on any tool.
 - **SSE and STDIO transport** — run locally for Claude Desktop or expose over HTTP.
 
 ---
@@ -156,6 +157,22 @@ python server.py --transport stdio
 python server.py --transport sse --host 0.0.0.0 --port 8000
 ```
 
+### Tool filtering
+
+All tools support filtering by device name, group, or platform:
+
+```python
+# By name (single or list)
+nornir_get_facts(name="R1")
+nornir_get_facts(name=["R1", "S1"])
+
+# By group
+nornir_get_facts(group="cisco")
+
+# By platform
+nornir_get_facts(platform="eos")
+```
+
 ### NAPALM getters
 
 Use `nornir_run_getter` with any of these:
@@ -183,11 +200,13 @@ Use `nornir_run_getter` with any of these:
 
 ```
 net-tool/
-├── server.py              # FastMCP server, Nornir init, tool definitions
-├── pyproject.toml         # Build config, dependencies, tool settings
+├── models.py            # Pydantic data models (InventoryDevice, GetterInfo)
+├── runner.py            # Nornir initialization and caching
+├── server.py            # FastMCP server and tool definitions
+├── pyproject.toml       # Build config, dependencies, tool settings
 └── tests/
-    ├── conftest.py        # Fake Nornir stubs and fixtures
-    └── test_helpers.py    # Unit tests for server.py
+    ├── conftest.py      # Fake Nornir stubs and fixtures
+    └── test_helpers.py  # Unit tests for all tools
 ```
 
 ---
@@ -202,7 +221,7 @@ uv run pytest
 uv run ruff check .
 
 # Type check (strict mode)
-uv run mypy server.py
+uv run mypy .
 
 # Build wheel
 uv build
@@ -210,10 +229,15 @@ uv build
 
 ---
 
+## Companion Lab
+
+- **nornir-mcp-lab** (`/home/zulu/Documents/nornir-mcp-lab`): Containerlab test lab with Cisco CSR1000v + Arista cEOS devices. Deploy with `containerlab deploy -t lab.clab.yaml`, then test tools against live devices.
+
+---
+
 ## Post-MVP Roadmap
 
 - [ ] Safe config push (`napalm_configure` with mandatory dry-run)
-- [ ] Group-based bulk queries ("get ARP for all spines")
 - [ ] NetBox inventory backend (`nornir-netbox`)
 - [ ] Connection pooling / persistent NAPALM connections
 - [ ] Structured error codes surfaced back to the LLM
