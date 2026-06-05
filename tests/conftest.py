@@ -5,9 +5,14 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 import pytest
+
+# Create a sentinel config file so runner._resolve_config_path succeeds.
+_TEST_CONFIG = Path("/tmp/nornir_test_config.yaml")
+_TEST_CONFIG.touch(exist_ok=True)
 
 
 @dataclass
@@ -151,6 +156,13 @@ def _make_host(name: str, hostname: str, platform: str, groups: list[str]) -> Fa
         platform=platform,
         groups=[FakeGroup(name=g) for g in groups],
     )
+
+
+@pytest.fixture(autouse=True)
+def _fake_config_path(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Point ``NORNIR_CONFIG`` to the sentinel so ``_resolve_config_path``
+    returns an existing file and ``_load_config`` returns an empty dict."""
+    monkeypatch.setenv("NORNIR_CONFIG", str(_TEST_CONFIG))
 
 
 @pytest.fixture
