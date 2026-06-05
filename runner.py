@@ -8,7 +8,7 @@ from typing import Any, cast
 
 from nornir import InitNornir
 from nornir.core import Nornir
-from nornir_napalm.plugins.tasks import napalm_cli, napalm_get
+from nornir_napalm.plugins.tasks import napalm_cli, napalm_get, napalm_ping
 
 log = logging.getLogger("nornir-napalm-mcp")
 
@@ -132,12 +132,37 @@ def _extract_multiple_result(result: dict[str, Any]) -> dict[str, dict[str, Any]
     return extracted
 
 
-def _run_getter(device_name: str | list[str], getters: list[str]) -> dict[str, dict[str, Any]]:
+def _run_task(device_name: str | list[str], task: Any, **kwargs: Any) -> dict[str, dict[str, Any]]:
+    """General purpose Nornir task executor.
+
+    Args:
+        device_name: Exact host name as defined in hosts.yaml, or a list of host names.
+        task: The Nornir task function to execute.
+        **kwargs: Arguments to pass to the task.
+
+    Returns:
+        A dict mapping each host name to the task result.
+    """
+    nr = _get_nornir()
+    nr_filtered = _resolve_filter(nr, device_name)
+    result = nr_filtered.run(task=task, **kwargs)
+    return _extract_multiple_result(result)
+
+
+def _run_getter(
+    device_name: str | list[str],
+    getters: list[str],
+    getters_options: dict[str, Any] | None = None,
+    optional_args: dict[str, Any] | None = None,
+) -> dict[str, dict[str, Any]]:
     """Filter Nornir by device name(s) and run napalm_get.
 
     Args:
         device_name: Exact host name as defined in hosts.yaml, or a list of host names.
         getters: List of NAPALM getters to execute.
+        getters_options: Optional dict of getter-specific options
+            (e.g., {"config": {"retrieve": "startup"}}).
+        optional_args: Optional dict for NAPALM connection overrides (e.g., {"timeout": 120}).
 
     Returns:
         A dict mapping each host name to its raw getter dict.
@@ -146,10 +171,13 @@ def _run_getter(device_name: str | list[str], getters: list[str]) -> dict[str, d
         ValueError: For unknown devices.
         RuntimeError: For connection or task failures.
     """
-    nr = _get_nornir()
-    nr_filtered = _resolve_filter(nr, device_name)
-    result = nr_filtered.run(task=napalm_get, getters=getters)
-    return _extract_multiple_result(result)
+    return _run_task(
+        device_name,
+        napalm_get,
+        getters=getters,
+        getters_options=getters_options or {},
+        optional_args=optional_args or {},
+    )
 
 
 def _run_cli(device_name: str | list[str], commands: list[str]) -> dict[str, dict[str, str]]:
@@ -166,8 +194,48 @@ def _run_cli(device_name: str | list[str], commands: list[str]) -> dict[str, dic
         ValueError: For unknown devices.
         RuntimeError: For connection or task failures.
     """
-    nr = _get_nornir()
-    nr_filtered = _resolve_filter(nr, device_name)
-    result = nr_filtered.run(task=napalm_cli, commands=commands)
-    # CLI results are dict[str, str] per host
-    return cast(dict[str, dict[str, str]], _extract_multiple_result(result))
+    return cast(dict[str, dict[str, str]], _run_task(device_name, napalm_cli, commands=commands))
+
+
+def _run_ping(
+    device_name: str | list[str],
+    dest: str,
+    count: int,
+    timeout: int,
+    size: int,
+    source: str | None = None,
+    vrf: str | None = None,
+    ttl: int | None = None,
+) -> dict[str, dict[str, Any]]:
+    """Filter Nornir by device name(s) and run napalm_ping.
+
+    Args:
+        device_name: Exact host name(s) as defined in hosts.yaml.
+        dest: Destination IP or hostname.
+        count: Number of ICMP packets to send.
+        timeout: Timeout in seconds for each reply.
+        size: ICMP packet size in bytes.
+        source: Source IP address (optional).
+        vrf: VRF name (optional).
+        ttl: Time-to-live value (optional).
+
+    Returns:
+        A dict mapping each host name to the raw ping result dict.
+
+    Raises:
+        ValueError: For unknown devices.
+        RuntimeError: For connection or task failures.
+    """
+    kwargs: dict[str, Any] = {
+        "dest": dest,
+        "count": count,
+        "timeout": timeout,
+        "size": size,
+    }
+    if source is not None:
+        kwargs["source"] = source
+    if vrf is not None:
+        kwargs["vrf"] = vrf
+    if ttl is not None:
+        kwargs["ttl"] = ttl
+    return _run_task(device_name, napalm_ping, **kwargs)

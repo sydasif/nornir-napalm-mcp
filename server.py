@@ -17,12 +17,14 @@ from models import (
     InventoryDevice,
     NetworkFacts,
     NetworkInterfaces,
+    PingResult,
     ReloadSummary,
 )
 from runner import (
     _get_nornir,
     _run_cli,
     _run_getter,
+    _run_ping,
     reset_nornir,
 )
 
@@ -210,8 +212,16 @@ def nornir_get_interfaces(
 
 
 @mcp.tool()
-def nornir_run_getter(device_name: str | list[str], getter: str) -> Any | dict[str, Any]:
+def nornir_run_getter(
+    device_name: str | list[str],
+    getter: str,
+    getter_options: dict[str, Any] | None = None,
+    timeout: int | None = None,
+) -> Any | dict[str, Any]:
     """Run any supported NAPALM getter on a specific device or list of devices.
+
+    Supports per-getter options (e.g., for 'config' you can pass
+    getter_options={"retrieve": "startup"}) and an optional connection timeout.
 
     Useful for getters not covered by dedicated tools (e.g., 'arp_table', 'vlans').
 
@@ -219,6 +229,8 @@ def nornir_run_getter(device_name: str | list[str], getter: str) -> Any | dict[s
         device_name: Exact host name as defined in hosts.yaml (case-sensitive),
                      or a list of host names.
         getter: NAPALM getter name (without the "get_" prefix).
+        getter_options: Optional dict of getter-specific parameters.
+        timeout: Optional per-call timeout in seconds (overrides global).
 
     Returns:
         The result of the NAPALM getter for a single device, or a dict mapping
@@ -234,7 +246,9 @@ def nornir_run_getter(device_name: str | list[str], getter: str) -> Any | dict[s
             "Use lowercase letters, digits, and underscores only (e.g. 'arp_table')."
         )
 
-    data = _run_getter(device_name, [getter])
+    g_opts = {getter: getter_options} if getter_options else None
+    optional_args = {"timeout": timeout} if timeout else None
+    data = _run_getter(device_name, [getter], getters_options=g_opts, optional_args=optional_args)
 
     # Single device: return directly
     if isinstance(device_name, str):
@@ -414,6 +428,41 @@ def nornir_reload_inventory() -> ReloadSummary:
         removed=sorted(set(previous) - set(current)),
         total=len(current),
     )
+
+
+@mcp.tool()
+def nornir_run_ping(
+    dest: str,
+    device_name: str | list[str],
+    count: int = 5,
+    timeout: int = 2,
+    size: int = 100,
+    source: str | None = None,
+    vrf: str | None = None,
+    ttl: int | None = None,
+) -> PingResult | dict[str, PingResult]:
+    """Send ICMP ping from a device or list of devices to a destination.
+
+    Args:
+        dest: Destination IP address or hostname.
+        device_name: Exact host name(s) as defined in hosts.yaml.
+        count: Number of packets to send (default: 5).
+        timeout: Timeout in seconds for each reply (default: 2).
+        size: ICMP packet size in bytes (default: 100).
+        source: Source IP address (optional).
+        vrf: VRF name (optional).
+        ttl: Time-to-live value (optional).
+
+    Returns:
+        For a single device: a PingResult.
+        For multiple devices: a dict mapping device name to PingResult.
+    """
+    raw = _run_ping(device_name, dest, count, timeout, size, source, vrf, ttl)
+
+    if isinstance(device_name, str):
+        return PingResult.from_napalm(dest, raw[device_name])
+
+    return {dev: PingResult.from_napalm(dest, data) for dev, data in raw.items()}
 
 
 # ---------------------------------------------------------------------------
