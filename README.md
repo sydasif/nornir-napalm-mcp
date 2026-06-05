@@ -231,7 +231,7 @@ uv build
 
 ## Companion Lab
 
-- **nornir-mcp-lab** (`/home/zulu/Documents/nornir-mcp-lab`): Containerlab test lab with Cisco CSR1000v + Arista cEOS devices. Deploy with `containerlab deploy -t lab.clab.yaml`, then test tools against live devices.
+- **nornir-mcp-lab** (`~/Documents/nornir-mcp-lab`): Containerlab test lab with Cisco CSR1000v + Arista cEOS devices. Deploy with `containerlab deploy -t lab.clab.yaml`, then test tools against live devices.
 
 ---
 
