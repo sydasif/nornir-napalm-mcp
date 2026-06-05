@@ -171,13 +171,13 @@ def _run_getter(
         ValueError: For unknown devices.
         RuntimeError: For connection or task failures.
     """
-    return _run_task(
-        device_name,
-        napalm_get,
-        getters=getters,
-        getters_options=getters_options or {},
-        optional_args=optional_args or {},
-    )
+    task_kwargs: dict[str, Any] = {
+        "getters": getters,
+        "getters_options": getters_options or {},
+    }
+    if optional_args:
+        task_kwargs["optional_args"] = optional_args
+    return _run_task(device_name, napalm_get, **task_kwargs)
 
 
 def _run_cli(device_name: str | list[str], commands: list[str]) -> dict[str, dict[str, str]]:

@@ -114,13 +114,23 @@ class PingResult(BaseModel):
                 error=f"Unexpected ping response: {type(success_data).__name__}",
             )
 
+        # NAPALM drivers use inconsistent key names across platforms:
+        # - Arista EOS: packets_sent, packets_received
+        # - Cisco IOS / most drivers: probes_sent, packet_loss
+        probes_sent = success_data.get("probes_sent", success_data.get("packets_sent", 0))
+        nloss = success_data.get("packet_loss")
+        if nloss is not None and probes_sent > 0:
+            packets_received = probes_sent - int(nloss)
+        else:
+            packets_received = success_data.get("packets_received", 0)
+
         return cls(
             destination=destination,
             success=True,
             stats=PingStats(
-                packets_sent=success_data.get("packets_sent", 0),
-                packets_received=success_data.get("packets_received", 0),
-                packet_loss=success_data.get("packet_loss"),
+                packets_sent=probes_sent,
+                packets_received=packets_received,
+                # Don't pass raw count — let compute_loss validator derive percentage
                 rtt_min=success_data.get("rtt_min"),
                 rtt_max=success_data.get("rtt_max"),
                 rtt_avg=success_data.get("rtt_avg"),
