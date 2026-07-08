@@ -60,11 +60,19 @@ def _expand_config_key(key: str, value: object, config_dir: Path) -> object:
 def _resolve_config_path() -> Path:
     """Resolve the Nornir configuration file path.
 
-    Reads from ``NORNIR_CONFIG`` environment variable (default: ``config.yaml``).
-    ``~`` and ``$HOME`` (etc.) are expanded in the path.
+    Reads from ``NORNIR_CONFIG`` environment variable. If unset, the function
+    attempts to locate ``config.yaml`` in the project root. ``~`` and
+    environment variables are expanded in any resolved path.
     """
-    config_rel = os.environ.get("NORNIR_CONFIG", "config.yaml")
-    return Path(os.path.expandvars(config_rel)).expanduser().resolve()
+    # Primary source: explicit environment variable
+    config_env = os.environ.get("NORNIR_CONFIG")
+    if config_env:
+        # Expand user and env vars then resolve to absolute path
+        return Path(os.path.expandvars(config_env)).expanduser().resolve()
+
+    # Fallback option: ``config.yaml`` in the current working directory (project root)
+    cwd_config = Path.cwd() / "config.yaml"
+    return cwd_config.resolve()
 
 
 def _load_config(config_path: Path) -> dict:
