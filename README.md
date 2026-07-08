@@ -26,46 +26,21 @@ All operations are **read-only** — no configuration push is exposed.
 
 ---
 
-## Prerequisites
-
-- Python 3.12+
-- [uv](https://docs.astral.sh/uv/) package manager
-- Network devices accessible via SSH/eAPI/NETCONF with NAPALM driver support
-
----
-
 ## Setup
-
-### Quick start (uvx)
-
-```bash
-# Run directly from GitHub (no clone needed)
-uvx --from "git+https://github.com/<your-user>/nornir-napalm-mcp" nornir-napalm-mcp
-```
-
-### Local development
-
-```bash
-# Clone and install
-git clone <repo-url> && cd nornir-napalm-mcp
-
-# Install
-uv sync
-```
 
 ### Nornir configuration
 
 The server requires a Nornir configuration file, provided via the `NORNIR_CONFIG` environment variable.
 
-#### Setup
+#### Configuration Setup
 
-1. Copy the included example config to the project root (or any path you prefer):
+- Copy the included example config to the project root (or any path you prefer):
 
 ```bash
 cp config.example.yaml config.yaml
 ```
 
-2. Edit `config.yaml` to point at your inventory files. A minimal config looks like:
+- Edit `config.yaml` to point at your inventory files. A minimal config looks like:
 
 ```yaml
 ---
@@ -87,23 +62,11 @@ logging:
 
 _Note: The inventory files referenced must exist relative to this config file._
 
-3. Export the environment variable before starting the server:
-
-```bash
-export NORNIR_CONFIG=/path/to/config.yaml
-```
-
 ---
-
-### Environment variables
-
-| Variable        | Default      | Description                         |
-| --------------- | ------------ | ----------------------------------- |
-| `NORNIR_CONFIG` | — (required) | Path to the Nornir bootstrap config |
 
 ### MCP client configuration
 
-Register this server with any MCP client (Claude Desktop, VS Code, etc.) by adding one of the following to your project's `.mcp.json`:
+Register this server with any MCP client (Claude Desktop, VS Code, etc.) by adding the following to your project's `.mcp.json`:
 
 #### uvx from GitHub (recommended)
 
@@ -125,71 +88,13 @@ Register this server with any MCP client (Claude Desktop, VS Code, etc.) by addi
 }
 ```
 
-#### Local install
+### Environment variables
 
-```json
-{
-  "mcpServers": {
-    "nornir": {
-      "command": "uv",
-      "args": [
-        "run",
-        "--directory",
-        "/path/to/nornir-napalm-mcp",
-        "nornir-napalm-mcp"
-      ],
-      "env": {
-        "NORNIR_CONFIG": "/absolute/path/to/config.yaml"
-      }
-    }
-  }
-}
-```
+| Variable        | Default      | Description                         |
+| --------------- | ------------ | ----------------------------------- |
+| `NORNIR_CONFIG` | — (required) | Path to the Nornir bootstrap config |
 
 ---
-
-## Usage
-
-### Local development (MCP Inspector)
-
-```bash
-fastmcp dev nornir_napalm_mcp/server.py
-```
-
-### Claude Desktop
-
-```bash
-fastmcp install nornir_napalm_mcp/server.py
-```
-
-### CLI
-
-```bash
-# STDIO transport (default, for Claude Desktop)
-nornir-napalm-mcp --transport stdio
-
-# SSE transport (for network-accessible deployments)
-nornir-napalm-mcp --transport sse --host 0.0.0.0 --port 8000
-
-# Or via python -m
-python -m nornir_napalm_mcp --transport stdio
-```
-
-### Tool filtering
-
-All tools support filtering by device name, group, or platform:
-
-```python
-# By name (single or list)
-nornir_get_facts(name="R1")
-nornir_get_facts(name=["R1", "S1"])
-
-# By group
-nornir_get_facts(group="cisco")
-
-# By platform
-nornir_get_facts(platform="eos")
-```
 
 ### NAPALM getters
 
@@ -216,7 +121,7 @@ Use `nornir_run_getter` with any of these:
 
 ## Project Structure
 
-```
+```bash
 nornir-napalm-mcp/
 ├── nornir_napalm_mcp/
 │   ├── __init__.py      # Package version
@@ -256,13 +161,4 @@ uvx --from "git+https://github.com/<your-user>/nornir-napalm-mcp" nornir-napalm-
 
 ## Companion Lab
 
-- **nornir-mcp-lab** (`~/Documents/nornir-mcp-lab`): Containerlab test lab with Cisco CSR1000v + Arista cEOS devices. Deploy with `containerlab deploy -t lab.clab.yaml`, then test tools against live devices.
-
----
-
-## Post-MVP Roadmap
-
-- [ ] Safe config push (`napalm_configure` with mandatory dry-run)
-- [ ] NetBox inventory backend (`nornir-netbox`)
-- [ ] Connection pooling / persistent NAPALM connections
-- [ ] Structured error codes surfaced back to the LLM
+- To test the tools, you can use the [netlab-demo](https://github.com/sydasif/netlab-demo.git) test lab with Cisco devices.
