@@ -55,11 +55,17 @@ uv sync
 
 ### Nornir configuration
 
-The server requires a Nornir configuration file. You can provide it in two ways:
+The server requires a Nornir configuration file, provided via the `NORNIR_CONFIG` environment variable.
 
-#### 1. Default (no env var)
+#### Setup
 
-Optionally place a `config.yaml` in the project root (the directory from which you run the server). If present, it will be used as the Nornir bootstrap configuration. When absent, you must provide a configuration via the `NORNIR_CONFIG` environment variable.
+1. Copy the included example config to the project root (or any path you prefer):
+
+```bash
+cp config.example.yaml config.yaml
+```
+
+2. Edit `config.yaml` to point at your inventory files. A minimal config looks like:
 
 ```yaml
 ---
@@ -81,64 +87,25 @@ logging:
 
 _Note: The inventory files referenced must exist relative to this config file._
 
-#### 2. External (using `NORNIR_CONFIG`)
-
-Set the `NORNIR_CONFIG` environment variable to point to an external configuration file (e.g., for use with a test lab):
+3. Export the environment variable before starting the server:
 
 ```bash
-export NORNIR_CONFIG=/path/to/your/config.yaml
+export NORNIR_CONFIG=/path/to/config.yaml
 ```
 
 ---
 
 ### Environment variables
 
-| Variable        | Default       | Description                         |
-| --------------- | ------------- | ----------------------------------- |
-| `NORNIR_CONFIG` | `config.yaml` | Path to the Nornir bootstrap config |
+| Variable        | Default      | Description                         |
+| --------------- | ------------ | ----------------------------------- |
+| `NORNIR_CONFIG` | — (required) | Path to the Nornir bootstrap config |
 
 ### MCP client configuration
 
 Register this server with any MCP client (Claude Desktop, VS Code, etc.) by adding one of the following to your project's `.mcp.json`:
 
-#### 1. uvx from GitHub (recommended)
-
-```json
-{
-  "mcpServers": {
-    "nornir": {
-      "command": "uvx",
-      "args": [
-        "--from",
-        "git+https://github.com/<your-user>/nornir-napalm-mcp",
-        "nornir-napalm-mcp"
-      ]
-    }
-  }
-}
-```
-
-#### 2. Local install
-
-```json
-{
-  "mcpServers": {
-    "nornir": {
-      "command": "uv",
-      "args": [
-        "run",
-        "--directory",
-        "/path/to/nornir-napalm-mcp",
-        "nornir-napalm-mcp"
-      ]
-    }
-  }
-}
-```
-
-#### 3. External (Lab config)
-
-Uses an external configuration file via environment variable.
+#### uvx from GitHub (recommended)
 
 ```json
 {
@@ -151,7 +118,28 @@ Uses an external configuration file via environment variable.
         "nornir-napalm-mcp"
       ],
       "env": {
-        "NORNIR_CONFIG": "/path/to/lab/config.yaml"
+        "NORNIR_CONFIG": "/absolute/path/to/config.yaml"
+      }
+    }
+  }
+}
+```
+
+#### Local install
+
+```json
+{
+  "mcpServers": {
+    "nornir": {
+      "command": "uv",
+      "args": [
+        "run",
+        "--directory",
+        "/path/to/nornir-napalm-mcp",
+        "nornir-napalm-mcp"
+      ],
+      "env": {
+        "NORNIR_CONFIG": "/absolute/path/to/config.yaml"
       }
     }
   }

@@ -17,3 +17,5 @@ build/
 coverage.xml
 .DS_Store
 *.pdf
+config.yaml
+inventory/

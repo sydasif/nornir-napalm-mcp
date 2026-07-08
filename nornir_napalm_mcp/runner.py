@@ -60,19 +60,25 @@ def _expand_config_key(key: str, value: object, config_dir: Path) -> object:
 def _resolve_config_path() -> Path:
     """Resolve the Nornir configuration file path.
 
-    Reads from ``NORNIR_CONFIG`` environment variable. If unset, the function
-    attempts to locate ``config.yaml`` in the project root. ``~`` and
-    environment variables are expanded in any resolved path.
+    The server **requires** the ``NORNIR_CONFIG`` environment variable to be set.
+    No automatic fallback to a ``config.yaml`` file in the cwd is performed.
+    If the variable is missing or the referenced file does not exist, a clear
+    ``FileNotFoundError`` is raised to guide the user.
     """
-    # Primary source: explicit environment variable
     config_env = os.environ.get("NORNIR_CONFIG")
-    if config_env:
-        # Expand user and env vars then resolve to absolute path
-        return Path(os.path.expandvars(config_env)).expanduser().resolve()
-
-    # Fallback option: ``config.yaml`` in the current working directory (project root)
-    cwd_config = Path.cwd() / "config.yaml"
-    return cwd_config.resolve()
+    if not config_env:
+        raise FileNotFoundError(
+            "NORNIR_CONFIG environment variable is required to locate the Nornir "
+            "configuration file. Set NORNIR_CONFIG to the absolute path of a "
+            "valid config.yaml (e.g., export NORNIR_CONFIG=/path/to/config.yaml)."
+        )
+    # Expand user and env vars then resolve to absolute path
+    config_path = Path(os.path.expandvars(config_env)).expanduser().resolve()
+    if not config_path.exists():
+        raise FileNotFoundError(
+            f"Nornir config file not found at path specified by NORNIR_CONFIG: {config_path}"
+        )
+    return config_path
 
 
 def _load_config(config_path: Path) -> dict:
