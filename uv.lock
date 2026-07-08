@@ -1280,6 +1280,7 @@ dependencies = [
     { name = "napalm" },
     { name = "nornir" },
     { name = "nornir-napalm" },
+    { name = "paramiko" },
     { name = "pydantic" },
 ]
 
@@ -1293,6 +1294,7 @@ dev = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "fastmcp" },
     { name = "pytest" },
     { name = "pytest-cov" },
 ]
@@ -1304,6 +1306,7 @@ requires-dist = [
     { name = "napalm", specifier = ">=5.0" },
     { name = "nornir", specifier = ">=3.4" },
     { name = "nornir-napalm", specifier = ">=0.4" },
+    { name = "paramiko", specifier = "<5.0.0" },
     { name = "pydantic", specifier = ">=2.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=7.1.0" },
@@ -1313,6 +1316,7 @@ provides-extras = ["dev"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "fastmcp", specifier = ">=3.3.1" },
     { name = "pytest", specifier = ">=9.0.3" },
     { name = "pytest-cov", specifier = ">=7.1.0" },
 ]

@@ -16,6 +16,7 @@ dependencies = [
     "nornir-napalm>=0.4",
     "napalm>=5.0",
     "pydantic>=2.0",
+    "paramiko<5.0.0",
 ]
 
 [project.optional-dependencies]
@@ -64,6 +65,7 @@ filterwarnings = [
 
 [dependency-groups]
 dev = [
+    "fastmcp>=3.3.1",
     "pytest>=9.0.3",
     "pytest-cov>=7.1.0",
 ]
