@@ -59,7 +59,7 @@ The server requires a Nornir configuration file. You can provide it in two ways:
 
 #### 1. Default (no env var)
 
-Place a `config.yaml` in the project root:
+Optionally place a `config.yaml` in the project root (the directory from which you run the server). If present, it will be used as the Nornir bootstrap configuration. When absent, you must provide a configuration via the `NORNIR_CONFIG` environment variable.
 
 ```yaml
 ---
@@ -79,7 +79,7 @@ logging:
   enabled: false
 ```
 
-_Note: The inventory files must exist relative to this config file._
+_Note: The inventory files referenced must exist relative to this config file._
 
 #### 2. External (using `NORNIR_CONFIG`)
 
