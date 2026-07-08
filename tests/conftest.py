@@ -176,5 +176,5 @@ def fake_nornir(monkeypatch: pytest.MonkeyPatch) -> dict[str, FakeHost]:
     def mock_init(**_: object) -> FakeNornir:
         return FakeNornir(FakeInventory(FakeHosts(hosts_data)))
 
-    monkeypatch.setattr("runner.InitNornir", mock_init)
+    monkeypatch.setattr("nornir_napalm_mcp.runner.InitNornir", mock_init)
     return hosts_data

@@ -6,8 +6,8 @@ from typing import TYPE_CHECKING, Any
 
 from fastmcp import FastMCP
 
-from models import GetterInfo, InventoryDevice
-from runner import _get_nornir, reset_nornir
+from nornir_napalm_mcp.models import GetterInfo, InventoryDevice
+from nornir_napalm_mcp.runner import _get_nornir, reset_nornir
 
 if TYPE_CHECKING:
     from nornir.core import Nornir

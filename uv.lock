@@ -1274,7 +1274,6 @@ wheels = [
 
 [[package]]
 name = "nornir-napalm-mcp"
-version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "fastmcp" },
@@ -1292,6 +1291,12 @@ dev = [
     { name = "ruff" },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "pytest" },
+    { name = "pytest-cov" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "fastmcp", specifier = ">=2.0" },
@@ -1305,6 +1310,12 @@ requires-dist = [
     { name = "ruff", marker = "extra == 'dev'" },
 ]
 provides-extras = ["dev"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "pytest", specifier = ">=9.0.3" },
+    { name = "pytest-cov", specifier = ">=7.1.0" },
+]
 
 [[package]]
 name = "ntc-templates"

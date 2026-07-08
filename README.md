@@ -36,9 +36,18 @@ All operations are **read-only** — no configuration push is exposed.
 
 ## Setup
 
+### Quick start (uvx)
+
+```bash
+# Run directly from GitHub (no clone needed)
+uvx --from "git+https://github.com/<your-user>/nornir-napalm-mcp" nornir-napalm-mcp
+```
+
+### Local development
+
 ```bash
 # Clone and install
-git clone <repo-url> && cd net-tool
+git clone <repo-url> && cd nornir-napalm-mcp
 
 # Install
 uv sync
@@ -92,24 +101,24 @@ export NORNIR_CONFIG=/path/to/your/config.yaml
 
 Register this server with any MCP client (Claude Desktop, VS Code, etc.) by adding one of the following to your project's `.mcp.json`:
 
-#### 1. Default (Local config)
-
-Uses `config.yaml` in the `net-tool` directory.
+#### 1. uvx from GitHub (recommended)
 
 ```json
 {
   "mcpServers": {
     "nornir": {
-      "command": "uv",
-      "args": ["run", "--directory", "/path/to/net-tool", "python", "server.py"]
+      "command": "uvx",
+      "args": [
+        "--from",
+        "git+https://github.com/<your-user>/nornir-napalm-mcp",
+        "nornir-napalm-mcp"
+      ]
     }
   }
 }
 ```
 
-#### 2. External (Lab config)
-
-Uses an external configuration file via environment variable.
+#### 2. Local install
 
 ```json
 {
@@ -119,9 +128,27 @@ Uses an external configuration file via environment variable.
       "args": [
         "run",
         "--directory",
-        "/path/to/net-tool",
-        "python",
-        "server.py"
+        "/path/to/nornir-napalm-mcp",
+        "nornir-napalm-mcp"
+      ]
+    }
+  }
+}
+```
+
+#### 3. External (Lab config)
+
+Uses an external configuration file via environment variable.
+
+```json
+{
+  "mcpServers": {
+    "nornir": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "git+https://github.com/<your-user>/nornir-napalm-mcp",
+        "nornir-napalm-mcp"
       ],
       "env": {
         "NORNIR_CONFIG": "/path/to/lab/config.yaml"
@@ -138,23 +165,26 @@ Uses an external configuration file via environment variable.
 ### Local development (MCP Inspector)
 
 ```bash
-fastmcp dev server.py
+fastmcp dev nornir_napalm_mcp/server.py
 ```
 
 ### Claude Desktop
 
 ```bash
-fastmcp install server.py
+fastmcp install nornir_napalm_mcp/server.py
 ```
 
 ### CLI
 
 ```bash
 # STDIO transport (default, for Claude Desktop)
-python server.py --transport stdio
+nornir-napalm-mcp --transport stdio
 
 # SSE transport (for network-accessible deployments)
-python server.py --transport sse --host 0.0.0.0 --port 8000
+nornir-napalm-mcp --transport sse --host 0.0.0.0 --port 8000
+
+# Or via python -m
+python -m nornir_napalm_mcp --transport stdio
 ```
 
 ### Tool filtering
@@ -199,14 +229,18 @@ Use `nornir_run_getter` with any of these:
 ## Project Structure
 
 ```
-net-tool/
-├── models.py            # Pydantic data models (InventoryDevice, GetterInfo)
-├── runner.py            # Nornir initialization and caching
-├── server.py            # FastMCP server and tool definitions
+nornir-napalm-mcp/
+├── nornir_napalm_mcp/
+│   ├── __init__.py      # Package version
+│   ├── __main__.py      # python -m support
+│   ├── models.py        # Pydantic data models (InventoryDevice, GetterInfo)
+│   ├── runner.py        # Nornir initialization and caching
+│   └── server.py        # FastMCP server and tool definitions
+├── tests/
+│   ├── conftest.py      # Fake Nornir stubs and fixtures
+│   └── test_helpers.py  # Unit tests for all tools
 ├── pyproject.toml       # Build config, dependencies, tool settings
-└── tests/
-    ├── conftest.py      # Fake Nornir stubs and fixtures
-    └── test_helpers.py  # Unit tests for all tools
+└── README.md
 ```
 
 ---
@@ -225,6 +259,9 @@ uv run mypy .
 
 # Build wheel
 uv build
+
+# Install from GitHub with uvx
+uvx --from "git+https://github.com/<your-user>/nornir-napalm-mcp" nornir-napalm-mcp
 ```
 
 ---

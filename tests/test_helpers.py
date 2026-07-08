@@ -10,8 +10,7 @@ from collections.abc import Iterator
 
 import pytest
 
-import runner
-import server
+from nornir_napalm_mcp import runner, server
 from tests.conftest import FakeGroup, FakeHost, FakeHosts, FakeInventory, FakeNornir
 
 
@@ -195,7 +194,7 @@ def test_list_getters_unknown_platform_returns_empty(monkeypatch: pytest.MonkeyP
     def mock_init(**_: object) -> FakeNornir:
         return FakeNornir(FakeInventory(FakeHosts(hosts_data)))
 
-    monkeypatch.setattr("runner.InitNornir", mock_init)
+    monkeypatch.setattr("nornir_napalm_mcp.runner.InitNornir", mock_init)
     runner._get_nornir.cache_clear()
     results = server.nornir_list_getters()
     assert len(results) == 1
@@ -268,7 +267,7 @@ def test_list_inventory_empty(monkeypatch: pytest.MonkeyPatch) -> None:
     def mock_init(**_: object) -> FakeNornir:
         return FakeNornir(FakeInventory(FakeHosts({})))
 
-    monkeypatch.setattr("runner.InitNornir", mock_init)
+    monkeypatch.setattr("nornir_napalm_mcp.runner.InitNornir", mock_init)
     runner._get_nornir.cache_clear()
     devices = server.nornir_list_inventory()
     assert devices == []

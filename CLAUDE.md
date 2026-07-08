@@ -9,7 +9,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 **Test Execution**
 
 - Run all tests: `uv run pytest`
-- Run with coverage: `uv run pytest --cov=src --cov-branch`
+- Run with coverage: `uv run pytest --cov=nornir_napalm_mcp --cov-branch`
 - Run specific test: `uv run pytest tests/test_helpers.py::test_function_name`
 
 **Code Quality**
@@ -28,38 +28,22 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Development Server**
 
-- Local dev (MCP Inspector): `fastmcp dev server.py`
-- Claude Desktop install: `fastmcp install server.py`
-- Run STDIO transport: `python server.py --transport stdio`
-- Run SSE transport: `python server.py --transport sse --host 0.0.0.0 --port 8000`
+- Local dev (MCP Inspector): `fastmcp dev nornir_napalm_mcp/server.py`
+- Claude Desktop install: `fastmcp install nornir_napalm_mcp/server.py`
+- Run STDIO transport: `nornir-napalm-mcp --transport stdio`
+- Run SSE transport: `nornir-napalm-mcp --transport sse --host 0.0.0.0 --port 8000`
 
 ## Code Architecture
 
 ### Core Components
 
-**models.py** - Pydantic data models:
+**nornir_napalm_mcp/** - Installable package:
 
-- `InventoryDevice` - Device name, hostname, platform, and groups
-- `GetterInfo` - Available NAPALM getters per platform
-
-**runner.py** - Nornir initialization:
-
-- `_get_nornir()` - `lru_cache` singleton with lazy initialization
-- `reset_nornir()` - Clears the cached instance
-
-**server.py** - FastMCP server and tool definitions:
-
-- `_filter_devices()` - Filters Nornir by name, group, or platform
-- Eight MCP tools:
-  1. `nornir_list_inventory` - Lists all devices from inventory
-  2. `nornir_get_facts` - Retrieves device system facts
-  3. `nornir_run_getter` - Generic NAPALM getter runner
-  4. `nornir_get_config` - Retrieves running/startup configuration
-  5. `nornir_run_cli` - Executes CLI commands
-  6. `nornir_ping` - Sends ICMP ping from device(s)
-  7. `nornir_list_getters` - Lists available getters per platform
-  8. `nornir_reload_inventory` - Reloads YAML inventory files
-- Main entry point with transport selection
+- `__init__.py` - Package version (`__version__`)
+- `__main__.py` - Supports `python -m nornir_napalm_mcp`
+- `models.py` - Pydantic data models (`InventoryDevice`, `GetterInfo`)
+- `runner.py` - Nornir initialization, config loading, caching (`_get_nornir()`, `reset_nornir()`)
+- `server.py` - FastMCP server, 8 MCP tools, `main()` entry point
 
 **Testing Approach** (`tests/` directory):
 
@@ -76,6 +60,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 3. **Device Filtering**: `_filter_devices()` provides consistent name/group/platform filtering across all tools
 4. **Configuration Override**: `NORNIR_CONFIG` environment variable allows custom config paths
 5. **Transport Flexibility**: Supports both STDIO (Claude Desktop) and SSE (network) transports
+6. **Installable Package**: Proper Python package structure for `uvx` execution from GitHub
 
 ### Data Flow
 
