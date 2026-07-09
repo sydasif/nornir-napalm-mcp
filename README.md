@@ -2,6 +2,13 @@
   <img src="mcp-logo.png" alt="Nornir-NAPALM MCP Server" width="400">
 </p>
 
+<p align="center">
+  <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/Python-3.12+-3776AB.svg?logo=python&logoColor=white" alt="Python 3.12+"></a>
+  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-green.svg" alt="License: MIT"></a>
+  <a href="https://github.com/sydasif/nornir-napalm-mcp/actions"><img src="https://img.shields.io/github/actions/workflow/status/sydasif/nornir-napalm-mcp/ci.yml?branch=main&label=tests" alt="Tests"></a>
+  <a href="https://github.com/sydasif/nornir-napalm-mcp"><img src="https://img.shields.io/badge/code%20style-ruff-black" alt="Code style: ruff"></a>
+</p>
+
 # Nornir-NAPALM FastMCP Server
 
 A FastMCP server that exposes live network device state to AI assistants via NAPALM getters. Nornir handles inventory loading and concurrent device connections over SSH, eAPI, and NETCONF.
