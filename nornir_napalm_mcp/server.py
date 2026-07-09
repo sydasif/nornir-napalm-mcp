@@ -6,11 +6,12 @@ from typing import TYPE_CHECKING, Any
 
 from fastmcp import FastMCP
 
-from nornir_napalm_mcp.models import GetterInfo, InventoryDevice
+from nornir_napalm_mcp.models import GetterInfo, HostResult, InventoryDevice
 from nornir_napalm_mcp.runner import _get_nornir, reset_nornir
 
 if TYPE_CHECKING:
     from nornir.core import Nornir
+    from nornir.core.task import AggregatedResult
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("nornir-napalm-mcp")
@@ -44,6 +45,10 @@ def _filter_devices(
     Raises:
         ValueError: If no devices match the provided filters.
     """
+    # Capture the pre-filter host names up front so the error message below
+    # doesn't need a second, separate fetch of the global Nornir instance.
+    all_host_names = list(nr.inventory.hosts)
+
     if name:
         if isinstance(name, str):
             name = [name]
@@ -54,13 +59,56 @@ def _filter_devices(
         nr = nr.filter(platform=platform)
 
     if not nr.inventory.hosts:
-        available = ", ".join(sorted(_get_nornir().inventory.hosts)) or "(none)"
+        available = ", ".join(sorted(all_host_names)) or "(none)"
         raise ValueError(
             f"No devices match filters (name={name}, group={group}, platform={platform}). "
             f"Available devices: {available}. Call nornir_list_inventory."
         )
 
     return nr
+
+
+def _result_to_dict(result: "AggregatedResult") -> dict[str, HostResult]:
+    """Converts a Nornir AggregatedResult into a dict of HostResult keyed by host.
+
+    Per-host task failures are surfaced via an explicit ``ok=False`` /
+    ``error=...`` entry rather than silently returning the underlying
+    exception object as if it were normal task data.
+
+    Args:
+        result: The AggregatedResult returned by ``nr.run(...)``.
+
+    Returns:
+        A dictionary mapping each host name to a HostResult: ``ok=True``
+        with ``data`` populated on success, or ``ok=False`` with ``error``
+        populated if the task failed for that host.
+    """
+    output: dict[str, HostResult] = {}
+    for host, multi_result in result.items():
+        if not multi_result:
+            output[host] = HostResult(ok=False, error="No tasks returned for host")
+            continue
+        if multi_result.failed:
+            failure = multi_result[0].exception or multi_result[0].result
+            output[host] = HostResult(ok=False, error=str(failure))
+        else:
+            output[host] = HostResult(ok=True, data=multi_result[0].result)
+    return output
+
+
+def _raw_result(result: "AggregatedResult") -> dict[str, Any]:
+    """Extract the original per-host dict that the tools returned before refactor.
+
+    The original implementation did ``{host: task[0].result for host, task in result.items()}``.
+    This helper reproduces that shape so callers can request the legacy format via ``raw=True``.
+    """
+    raw: dict[str, Any] = {}
+    for host, multi_result in result.items():
+        if not multi_result:
+            raw[host] = None
+        else:
+            raw[host] = multi_result[0].result
+    return raw
 
 
 @mcp.tool()
@@ -88,6 +136,7 @@ def nornir_get_facts(
     name: str | list[str] | None = None,
     group: str | None = None,
     platform: str | None = None,
+    raw: bool = False,
 ) -> dict[str, Any]:
     """Retrieves system facts from network device(s) via NAPALM.
 
@@ -98,10 +147,13 @@ def nornir_get_facts(
         name: Device name or list of names to query.
         group: Group name to filter devices by.
         platform: Platform name to filter devices by.
+        raw: If True, return the legacy raw dict (host → result); if False (default) return HostResult objects.
 
     Returns:
-        A dictionary mapping each device name to its facts dictionary
-        containing hostname, vendor, model, os_version, and serial_number.
+        A dictionary mapping each device name to a HostResult. On success,
+        ``data`` contains the facts dictionary (hostname, vendor, model,
+        os_version, serial_number). On failure, ``ok`` is False and
+        ``error`` describes what went wrong.
 
     Raises:
         ValueError: If no devices match the provided filters.
@@ -110,7 +162,7 @@ def nornir_get_facts(
 
     nr = _filter_devices(_get_nornir(), name=name, group=group, platform=platform)
     result = nr.run(task=napalm_get, getters=["facts"])
-    return {host: task[0].result for host, task in result.items()}
+    return _raw_result(result) if raw else _result_to_dict(result)
 
 
 @mcp.tool()
@@ -120,6 +172,7 @@ def nornir_run_getter(
     group: str | None = None,
     platform: str | None = None,
     getter_options: dict[str, Any] | None = None,
+    raw: bool = False,
 ) -> dict[str, Any]:
     """Runs any supported NAPALM getter on network device(s).
 
@@ -132,10 +185,12 @@ def nornir_run_getter(
         name: Device name or list of names to query.
         group: Group name to filter devices by.
         platform: Platform name to filter devices by.
+        raw: If True, return the legacy raw dict (host → result); if False (default) return HostResult objects.
         getter_options: Optional getter-specific parameters passed to NAPALM.
 
     Returns:
-        A dictionary mapping each device name to the getter result.
+        A dictionary mapping each device name to a HostResult containing
+        the getter result in ``data`` on success, or ``error`` on failure.
 
     Raises:
         ValueError: If no devices match the provided filters.
@@ -146,7 +201,7 @@ def nornir_run_getter(
 
     g_opts = {getter: getter_options} if getter_options else None
     result = nr.run(task=napalm_get, getters=[getter], getters_options=g_opts)
-    return {host: task[0].result for host, task in result.items()}
+    return _raw_result(result) if raw else _result_to_dict(result)
 
 
 @mcp.tool()
@@ -158,6 +213,7 @@ def nornir_get_config(
     full: bool = False,
     sanitized: bool = False,
     format: str = "text",
+    raw: bool = False,
 ) -> dict[str, Any]:
     """Retrieves device configuration from network device(s).
 
@@ -167,14 +223,16 @@ def nornir_get_config(
         name: Device name or list of names to query.
         group: Group name to filter devices by.
         platform: Platform name to filter devices by.
+        raw: If True, return the legacy raw dict (host → result); if False (default) return HostResult objects.
         retrieve: Which config to retrieve — 'running', 'startup', or 'all'.
         full: If True, return the full configuration without filtering.
         sanitized: If True, remove sensitive data from the output.
         format: Configuration format — 'text' or 'json'.
 
     Returns:
-        A dictionary mapping each device name to its configuration data
-        containing 'running' and/or 'startup' keys.
+        A dictionary mapping each device name to a HostResult. On success,
+        ``data`` contains the configuration dict with 'running' and/or
+        'startup' keys. On failure, ``error`` describes what went wrong.
 
     Raises:
         ValueError: If no devices match the provided filters.
@@ -193,7 +251,7 @@ def nornir_get_config(
     }
 
     result = nr.run(task=napalm_get, getters=["config"], getters_options=getter_options)
-    return {host: task[0].result for host, task in result.items()}
+    return _raw_result(result) if raw else _result_to_dict(result)
 
 
 @mcp.tool()
@@ -202,6 +260,7 @@ def nornir_run_cli(
     name: str | list[str] | None = None,
     group: str | None = None,
     platform: str | None = None,
+    raw: bool = False,
 ) -> dict[str, Any]:
     """Executes CLI commands on network device(s) via NAPALM.
 
@@ -213,10 +272,12 @@ def nornir_run_cli(
         name: Device name or list of names to target.
         group: Group name to filter devices by.
         platform: Platform name to filter devices by.
+        raw: If True, return the legacy raw dict (host → result); if False (default) return HostResult objects.
 
     Returns:
-        A dictionary mapping each device name to a dict of
-        command-to-output mappings.
+        A dictionary mapping each device name to a HostResult. On success,
+        ``data`` contains a dict of command-to-output mappings. On
+        failure, ``error`` describes what went wrong.
 
     Raises:
         ValueError: If no devices match the provided filters.
@@ -225,7 +286,7 @@ def nornir_run_cli(
 
     nr = _filter_devices(_get_nornir(), name=name, group=group, platform=platform)
     result = nr.run(task=napalm_cli, commands=commands)
-    return {host: task[0].result for host, task in result.items()}
+    return _raw_result(result) if raw else _result_to_dict(result)
 
 
 @mcp.tool()
@@ -240,6 +301,7 @@ def nornir_ping(
     size: int = 100,
     count: int = 5,
     vrf: str = "",
+    raw: bool = False,
 ) -> dict[str, Any]:
     """Sends ICMP ping from network device(s) to a destination.
 
@@ -251,6 +313,7 @@ def nornir_ping(
         name: Device name or list of names to ping from.
         group: Group name to filter devices by.
         platform: Platform name to filter devices by.
+        raw: If True, return the legacy raw dict (host → result); if False (default) return HostResult objects.
         source: Source IP address or interface to ping from.
         ttl: Time-to-live value for ICMP packets.
         timeout: Timeout in seconds for each ping attempt.
@@ -259,8 +322,10 @@ def nornir_ping(
         vrf: VRF name to ping within (for devices supporting VRFs).
 
     Returns:
-        A dictionary mapping each device name to ping results including
-        packets sent, received, loss percentage, and RTT statistics.
+        A dictionary mapping each device name to a HostResult. On success,
+        ``data`` contains ping results including packets sent, received,
+        loss percentage, and RTT statistics. On failure, ``error``
+        describes what went wrong.
 
     Raises:
         ValueError: If no devices match the provided filters.
@@ -279,7 +344,7 @@ def nornir_ping(
         count=count,
         vrf=vrf,
     )
-    return {host: task[0].result for host, task in result.items()}
+    return _raw_result(result) if raw else _result_to_dict(result)
 
 
 @mcp.tool()
@@ -307,8 +372,8 @@ def nornir_list_getters() -> list[GetterInfo]:
                 for name in dir(driver)
                 if name.startswith("get_") and callable(getattr(driver, name))
             )
-        except Exception:
-            log.warning("Could not introspect driver for platform '%s'", platform)
+        except Exception as e:
+            log.warning("Could not introspect driver for platform '%s': %s", platform, e)
             getters = []
         results.append(GetterInfo(platform=platform, getters=getters))
 

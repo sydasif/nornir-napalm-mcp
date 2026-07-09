@@ -11,15 +11,16 @@ from collections.abc import Iterator
 import pytest
 
 from nornir_napalm_mcp import runner, server
+from nornir_napalm_mcp.models import HostResult
 from tests.conftest import FakeGroup, FakeHost, FakeHosts, FakeInventory, FakeNornir
 
 
 @pytest.fixture(autouse=True)
 def _reload_server(fake_nornir: dict[str, FakeHost]) -> Iterator[None]:
     """Reset runner's cached Nornir singleton before each test."""
-    runner._get_nornir.cache_clear()
+    runner.reset_nornir()
     yield
-    runner._get_nornir.cache_clear()
+    runner.reset_nornir()
 
 
 def test_list_inventory_shape() -> None:
@@ -44,8 +45,9 @@ def test_get_facts_returns_dict() -> None:
     facts = server.nornir_get_facts(name="spine-01")
     assert isinstance(facts, dict)
     assert "spine-01" in facts
-    assert facts["spine-01"]["facts"]["hostname"] == "test-host"
-    assert facts["spine-01"]["facts"]["vendor"] == "Arista"
+    assert facts["spine-01"].ok is True
+    assert facts["spine-01"].data["facts"]["hostname"] == "test-host"
+    assert facts["spine-01"].data["facts"]["vendor"] == "Arista"
 
 
 def test_get_facts_by_group() -> None:
@@ -72,7 +74,8 @@ def test_run_getter_returns_payload() -> None:
     out = server.nornir_run_getter(getter="arp_table", name="spine-01")
     assert isinstance(out, dict)
     assert "spine-01" in out
-    assert out["spine-01"]["arp_table"] == {"ok": True}
+    assert out["spine-01"].ok is True
+    assert out["spine-01"].data["arp_table"] == {"ok": True}
 
 
 def test_run_getter_with_options() -> None:
@@ -81,7 +84,7 @@ def test_run_getter_with_options() -> None:
         getter="facts", name="spine-01", getter_options={"keys": ["hostname"]}
     )
     assert result == {
-        "spine-01": {"facts": {"hostname": "test-host", "vendor": "Arista", "model": "7280R"}}
+        "spine-01": HostResult(ok=True, data={"facts": {"hostname": "test-host", "vendor": "Arista", "model": "7280R"}})
     }
 
 
@@ -97,14 +100,15 @@ def test_get_config_returns_config() -> None:
     cfg = server.nornir_get_config(name="spine-01")
     assert isinstance(cfg, dict)
     assert "spine-01" in cfg
-    assert "running" in cfg["spine-01"]["config"]
-    assert "startup" in cfg["spine-01"]["config"]
+    assert cfg["spine-01"].ok is True
+    assert "running" in cfg["spine-01"].data["config"]
+    assert "startup" in cfg["spine-01"].data["config"]
 
 
 def test_get_config_running_only() -> None:
     """Verify nornir_get_config with retrieve='running'."""
     cfg = server.nornir_get_config(name="spine-01", retrieve="running")
-    assert cfg["spine-01"]["config"]["running"] is not None
+    assert cfg["spine-01"].data["config"]["running"] is not None
 
 
 def test_run_cli_returns_output() -> None:
@@ -112,14 +116,14 @@ def test_run_cli_returns_output() -> None:
     out = server.nornir_run_cli(commands=["show version"], name="spine-01")
     assert isinstance(out, dict)
     assert "spine-01" in out
-    assert "show version" in out["spine-01"]
+    assert "show version" in out["spine-01"].data
 
 
 def test_run_cli_multiple_commands() -> None:
     """Verify nornir_run_cli handles multiple commands."""
     out = server.nornir_run_cli(commands=["show version", "show ip route"], name="spine-01")
-    assert "show version" in out["spine-01"]
-    assert "show ip route" in out["spine-01"]
+    assert "show version" in out["spine-01"].data
+    assert "show ip route" in out["spine-01"].data
 
 
 def test_run_cli_batch() -> None:
@@ -134,8 +138,8 @@ def test_nornir_ping_returns_result() -> None:
     result = server.nornir_ping(destination="10.0.0.1", name="spine-01")
     assert isinstance(result, dict)
     assert "spine-01" in result
-    assert "rtt_avg" in result["spine-01"]
-    assert result["spine-01"]["packet_loss"] == 0
+    assert "rtt_avg" in result["spine-01"].data
+    assert result["spine-01"].data["packet_loss"] == 0
 
 
 def test_nornir_ping_with_options() -> None:
@@ -151,7 +155,7 @@ def test_nornir_ping_with_options() -> None:
         vrf="mgmt",
     )
     assert "spine-01" in result
-    assert result["spine-01"]["results_sent"] == 10
+    assert result["spine-01"].data["results_sent"] == 10
 
 
 def test_nornir_ping_by_group() -> None:
@@ -195,7 +199,7 @@ def test_list_getters_unknown_platform_returns_empty(monkeypatch: pytest.MonkeyP
         return FakeNornir(FakeInventory(FakeHosts(hosts_data)))
 
     monkeypatch.setattr("nornir_napalm_mcp.runner.InitNornir", mock_init)
-    runner._get_nornir.cache_clear()
+    runner.reset_nornir()
     results = server.nornir_list_getters()
     assert len(results) == 1
     assert results[0].platform == "nonexistent_os"
@@ -268,6 +272,6 @@ def test_list_inventory_empty(monkeypatch: pytest.MonkeyPatch) -> None:
         return FakeNornir(FakeInventory(FakeHosts({})))
 
     monkeypatch.setattr("nornir_napalm_mcp.runner.InitNornir", mock_init)
-    runner._get_nornir.cache_clear()
+    runner.reset_nornir()
     devices = server.nornir_list_inventory()
     assert devices == []

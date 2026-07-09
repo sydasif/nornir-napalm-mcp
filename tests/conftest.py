@@ -74,6 +74,20 @@ class FakeTaskResult:
 
 
 @dataclass
+class FakeHostResult:
+    """Per-host result wrapper so _result_to_dict can access .failed and [0]."""
+
+    tasks: list[FakeTaskResult]
+
+    @property
+    def failed(self) -> bool:
+        return any(t.failed for t in self.tasks)
+
+    def __getitem__(self, idx: int) -> FakeTaskResult:
+        return self.tasks[idx]
+
+
+@dataclass
 class FakeNornir:
     """Stub for Nornir instance."""
 
@@ -123,12 +137,12 @@ class FakeNornir:
                 },
             }
             result = {g: payloads.get(g, {"ok": True}) for g in getters}
-            return {name: [FakeTaskResult(result)] for name in hosts}
+            return {name: FakeHostResult([FakeTaskResult(result)]) for name in hosts}
 
         if "commands" in kwargs:
             commands = kwargs["commands"]
             result = {cmd: f"Output for: {cmd}" for cmd in commands}
-            return {name: [FakeTaskResult(result)] for name in hosts}
+            return {name: FakeHostResult([FakeTaskResult(result)]) for name in hosts}
 
         if "dest" in kwargs:
             result = {
@@ -140,7 +154,7 @@ class FakeNornir:
                 "rtt_avg": 1.5,
                 "rtt_stddev": 0.3,
             }
-            return {name: [FakeTaskResult(result)] for name in hosts}
+            return {name: FakeHostResult([FakeTaskResult(result)]) for name in hosts}
 
         # Unrecognized task: fail loudly so new task types must be added explicitly
         raise NotImplementedError(
