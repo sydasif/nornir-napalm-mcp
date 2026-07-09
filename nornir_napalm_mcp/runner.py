@@ -3,6 +3,7 @@
 import os
 import threading
 from pathlib import Path
+from typing import Any
 
 import yaml
 from nornir import InitNornir
@@ -86,7 +87,7 @@ def _resolve_config_path() -> Path:
     return config_path
 
 
-def _load_config(config_path: Path) -> dict:
+def _load_config(config_path: Path) -> dict[str, Any]:
     """Load and expand a Nornir configuration file.
 
     All string values in the YAML file have ``~`` and ``$VAR`` expanded.
@@ -99,9 +100,8 @@ def _load_config(config_path: Path) -> dict:
     Returns:
         A dictionary suitable for passing as ``**kwargs`` to ``InitNornir``.
     """
-    with open(config_path) as f:
-        config = yaml.safe_load(f) or {}
-    return _expand_config(config, config_path.parent)
+    config = yaml.safe_load(config_path.read_text()) or {}
+    return _expand_config(config, config_path.parent)  # type: ignore[return-value]
 
 
 def _get_nornir() -> Nornir:

@@ -96,21 +96,6 @@ def _result_to_dict(result: "AggregatedResult") -> dict[str, HostResult]:
     return output
 
 
-def _raw_result(result: "AggregatedResult") -> dict[str, Any]:
-    """Extract the original per-host dict that the tools returned before refactor.
-
-    The original implementation did ``{host: task[0].result for host, task in result.items()}``.
-    This helper reproduces that shape so callers can request the legacy format via ``raw=True``.
-    """
-    raw: dict[str, Any] = {}
-    for host, multi_result in result.items():
-        if not multi_result:
-            raw[host] = None
-        else:
-            raw[host] = multi_result[0].result
-    return raw
-
-
 @mcp.tool()
 def nornir_list_inventory() -> list[InventoryDevice]:
     """Lists all devices in the Nornir inventory.
@@ -136,7 +121,6 @@ def nornir_get_facts(
     name: str | list[str] | None = None,
     group: str | None = None,
     platform: str | None = None,
-    raw: bool = False,
 ) -> dict[str, Any]:
     """Retrieves system facts from network device(s) via NAPALM.
 
@@ -147,7 +131,6 @@ def nornir_get_facts(
         name: Device name or list of names to query.
         group: Group name to filter devices by.
         platform: Platform name to filter devices by.
-        raw: If True, return the legacy raw dict (host → result); if False (default) return HostResult objects.
 
     Returns:
         A dictionary mapping each device name to a HostResult. On success,
@@ -162,7 +145,7 @@ def nornir_get_facts(
 
     nr = _filter_devices(_get_nornir(), name=name, group=group, platform=platform)
     result = nr.run(task=napalm_get, getters=["facts"])
-    return _raw_result(result) if raw else _result_to_dict(result)
+    return _result_to_dict(result)
 
 
 @mcp.tool()
@@ -172,7 +155,6 @@ def nornir_run_getter(
     group: str | None = None,
     platform: str | None = None,
     getter_options: dict[str, Any] | None = None,
-    raw: bool = False,
 ) -> dict[str, Any]:
     """Runs any supported NAPALM getter on network device(s).
 
@@ -185,7 +167,6 @@ def nornir_run_getter(
         name: Device name or list of names to query.
         group: Group name to filter devices by.
         platform: Platform name to filter devices by.
-        raw: If True, return the legacy raw dict (host → result); if False (default) return HostResult objects.
         getter_options: Optional getter-specific parameters passed to NAPALM.
 
     Returns:
@@ -201,7 +182,7 @@ def nornir_run_getter(
 
     g_opts = {getter: getter_options} if getter_options else None
     result = nr.run(task=napalm_get, getters=[getter], getters_options=g_opts)
-    return _raw_result(result) if raw else _result_to_dict(result)
+    return _result_to_dict(result)
 
 
 @mcp.tool()
@@ -213,7 +194,6 @@ def nornir_get_config(
     full: bool = False,
     sanitized: bool = False,
     format: str = "text",
-    raw: bool = False,
 ) -> dict[str, Any]:
     """Retrieves device configuration from network device(s).
 
@@ -223,7 +203,6 @@ def nornir_get_config(
         name: Device name or list of names to query.
         group: Group name to filter devices by.
         platform: Platform name to filter devices by.
-        raw: If True, return the legacy raw dict (host → result); if False (default) return HostResult objects.
         retrieve: Which config to retrieve — 'running', 'startup', or 'all'.
         full: If True, return the full configuration without filtering.
         sanitized: If True, remove sensitive data from the output.
@@ -251,7 +230,7 @@ def nornir_get_config(
     }
 
     result = nr.run(task=napalm_get, getters=["config"], getters_options=getter_options)
-    return _raw_result(result) if raw else _result_to_dict(result)
+    return _result_to_dict(result)
 
 
 @mcp.tool()
@@ -260,7 +239,6 @@ def nornir_run_cli(
     name: str | list[str] | None = None,
     group: str | None = None,
     platform: str | None = None,
-    raw: bool = False,
 ) -> dict[str, Any]:
     """Executes CLI commands on network device(s) via NAPALM.
 
@@ -272,7 +250,6 @@ def nornir_run_cli(
         name: Device name or list of names to target.
         group: Group name to filter devices by.
         platform: Platform name to filter devices by.
-        raw: If True, return the legacy raw dict (host → result); if False (default) return HostResult objects.
 
     Returns:
         A dictionary mapping each device name to a HostResult. On success,
@@ -286,7 +263,7 @@ def nornir_run_cli(
 
     nr = _filter_devices(_get_nornir(), name=name, group=group, platform=platform)
     result = nr.run(task=napalm_cli, commands=commands)
-    return _raw_result(result) if raw else _result_to_dict(result)
+    return _result_to_dict(result)
 
 
 @mcp.tool()

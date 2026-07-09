@@ -41,15 +41,6 @@ class FakeHosts:
     def values(self) -> list[FakeHost]:
         return list(self._hosts.values())
 
-    def get(self, name: str) -> FakeHost | None:
-        return self._hosts.get(name)
-
-    def __contains__(self, name: str) -> bool:
-        return name in self._hosts
-
-    def keys(self) -> list[str]:
-        return list(self._hosts.keys())
-
     def __iter__(self) -> Iterator[str]:
         return iter(self._hosts)
 
@@ -118,7 +109,7 @@ class FakeNornir:
 
         return FakeNornir(FakeInventory(FakeHosts(filtered)))
 
-    def run(self, task: Any, **kwargs: Any) -> dict[str, list[Any]]:
+    def run(self, task: Any, **kwargs: Any) -> dict[str, FakeHostResult]:
         """Run a task against all hosts in the filtered inventory."""
         hosts = self.inventory.hosts._hosts
         if not hosts:
@@ -126,7 +117,7 @@ class FakeNornir:
 
         # Dispatch based on which kwargs are present
         if "getters" in kwargs:
-            getters = kwargs["getters"]
+            getters: list[str] = kwargs["getters"]
             payloads = {
                 "facts": {"hostname": "test-host", "vendor": "Arista", "model": "7280R"},
                 "interfaces": {"Ethernet1": {"state": "up", "speed": "1000"}},
@@ -140,7 +131,7 @@ class FakeNornir:
             return {name: FakeHostResult([FakeTaskResult(result)]) for name in hosts}
 
         if "commands" in kwargs:
-            commands = kwargs["commands"]
+            commands: list[str] = kwargs["commands"]
             result = {cmd: f"Output for: {cmd}" for cmd in commands}
             return {name: FakeHostResult([FakeTaskResult(result)]) for name in hosts}
 

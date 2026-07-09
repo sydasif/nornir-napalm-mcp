@@ -84,7 +84,10 @@ def test_run_getter_with_options() -> None:
         getter="facts", name="spine-01", getter_options={"keys": ["hostname"]}
     )
     assert result == {
-        "spine-01": HostResult(ok=True, data={"facts": {"hostname": "test-host", "vendor": "Arista", "model": "7280R"}})
+        "spine-01": HostResult(
+            ok=True,
+            data={"facts": {"hostname": "test-host", "vendor": "Arista", "model": "7280R"}},
+        )
     }
 
 
