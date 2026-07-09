@@ -144,18 +144,6 @@ class FakeNornir:
             result = {cmd: f"Output for: {cmd}" for cmd in commands}
             return {name: FakeHostResult([FakeTaskResult(result)]) for name in hosts}
 
-        if "dest" in kwargs:
-            result = {
-                "results_sent": kwargs.get("count", 5),
-                "results_received": kwargs.get("count", 5),
-                "packet_loss": 0,
-                "rtt_min": 1.0,
-                "rtt_max": 2.0,
-                "rtt_avg": 1.5,
-                "rtt_stddev": 0.3,
-            }
-            return {name: FakeHostResult([FakeTaskResult(result)]) for name in hosts}
-
         # Unrecognized task: fail loudly so new task types must be added explicitly
         raise NotImplementedError(
             f"No dispatch for task={task} with kwargs={set(kwargs.keys())}. "

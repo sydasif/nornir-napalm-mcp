@@ -43,7 +43,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `__main__.py` - Supports `python -m nornir_napalm_mcp`
 - `models.py` - Pydantic data models (`InventoryDevice`, `GetterInfo`)
 - `runner.py` - Nornir initialization, config loading, caching (`_get_nornir()`, `reset_nornir()`)
-- `server.py` - FastMCP server, 8 MCP tools, `main()` entry point
+- `server.py` - FastMCP server, 7 MCP tools, `main()` entry point
 
 **Testing Approach** (`tests/` directory):
 
@@ -87,5 +87,3 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - All errors include actionable messages suggesting next steps (e.g., call list_inventory first)
 
 ## Known Limitations
-
-- `nornir_ping` on Cisco IOS XE may fail with Netmiko ReadTimeout on slow virtual platforms (CSR1000v). Use `nornir_run_cli(commands=["ping ..."])` as a workaround.

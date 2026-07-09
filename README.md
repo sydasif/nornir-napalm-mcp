@@ -15,7 +15,6 @@ All operations are **read-only** — no configuration push is exposed.
 | `nornir_run_getter`       | Run any NAPALM getter by name (`arp_table`, `bgp_neighbors`, `vlans`, etc.) |
 | `nornir_get_config`       | Retrieve running and/or startup configuration from a device                 |
 | `nornir_run_cli`          | Execute read-only CLI commands via NAPALM's CLI method                      |
-| `nornir_ping`             | Send ICMP ping from device(s) to test network reachability                  |
 | `nornir_list_getters`     | Introspect available NAPALM getters for each platform in the inventory      |
 | `nornir_reload_inventory` | Re-read YAML inventory from disk                                            |
 

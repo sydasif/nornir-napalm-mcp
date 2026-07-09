@@ -290,64 +290,6 @@ def nornir_run_cli(
 
 
 @mcp.tool()
-def nornir_ping(
-    destination: str,
-    name: str | list[str] | None = None,
-    group: str | None = None,
-    platform: str | None = None,
-    source: str = "",
-    ttl: int = 255,
-    timeout: int = 2,
-    size: int = 100,
-    count: int = 5,
-    vrf: str = "",
-    raw: bool = False,
-) -> dict[str, Any]:
-    """Sends ICMP ping from network device(s) to a destination.
-
-    Executes ping from the device itself (not from the MCP server) to test
-    network reachability between the device and the target destination.
-
-    Args:
-        destination: IP address or hostname to ping.
-        name: Device name or list of names to ping from.
-        group: Group name to filter devices by.
-        platform: Platform name to filter devices by.
-        raw: If True, return the legacy raw dict (host → result); if False (default) return HostResult objects.
-        source: Source IP address or interface to ping from.
-        ttl: Time-to-live value for ICMP packets.
-        timeout: Timeout in seconds for each ping attempt.
-        size: ICMP packet size in bytes.
-        count: Number of ping packets to send.
-        vrf: VRF name to ping within (for devices supporting VRFs).
-
-    Returns:
-        A dictionary mapping each device name to a HostResult. On success,
-        ``data`` contains ping results including packets sent, received,
-        loss percentage, and RTT statistics. On failure, ``error``
-        describes what went wrong.
-
-    Raises:
-        ValueError: If no devices match the provided filters.
-    """
-    from nornir_napalm.plugins.tasks import napalm_ping
-
-    nr = _filter_devices(_get_nornir(), name=name, group=group, platform=platform)
-
-    result = nr.run(
-        task=napalm_ping,
-        dest=destination,
-        source=source,
-        ttl=ttl,
-        timeout=timeout,
-        size=size,
-        count=count,
-        vrf=vrf,
-    )
-    return _raw_result(result) if raw else _result_to_dict(result)
-
-
-@mcp.tool()
 def nornir_list_getters() -> list[GetterInfo]:
     """Lists available NAPALM getters for each platform in the inventory.
 

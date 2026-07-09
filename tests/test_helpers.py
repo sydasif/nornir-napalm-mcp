@@ -133,38 +133,6 @@ def test_run_cli_batch() -> None:
     assert set(result.keys()) == {"spine-01", "leaf-01"}
 
 
-def test_nornir_ping_returns_result() -> None:
-    """Verify nornir_ping returns ping results."""
-    result = server.nornir_ping(destination="10.0.0.1", name="spine-01")
-    assert isinstance(result, dict)
-    assert "spine-01" in result
-    assert "rtt_avg" in result["spine-01"].data
-    assert result["spine-01"].data["packet_loss"] == 0
-
-
-def test_nornir_ping_with_options() -> None:
-    """Verify nornir_ping accepts all optional parameters."""
-    result = server.nornir_ping(
-        destination="10.0.0.1",
-        name="spine-01",
-        source="10.0.0.2",
-        ttl=64,
-        timeout=5,
-        size=200,
-        count=10,
-        vrf="mgmt",
-    )
-    assert "spine-01" in result
-    assert result["spine-01"].data["results_sent"] == 10
-
-
-def test_nornir_ping_by_group() -> None:
-    """Verify nornir_ping filters by group."""
-    result = server.nornir_ping(destination="10.0.0.1", group="leaf")
-    assert "leaf-01" in result
-    assert "spine-01" not in result
-
-
 def test_list_getters_returns_platforms() -> None:
     """Verify list_getters returns GetterInfo for each platform."""
     results = server.nornir_list_getters()
