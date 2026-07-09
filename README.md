@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="mcp-logo.png" alt="Nornir-NAPALM MCP Server" width="400">
+</p>
+
 # Nornir-NAPALM FastMCP Server
 
 A FastMCP server that exposes live network device state to AI assistants via NAPALM getters. Nornir handles inventory loading and concurrent device connections over SSH, eAPI, and NETCONF.
