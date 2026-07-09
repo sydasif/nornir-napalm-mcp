@@ -4,8 +4,9 @@
 
 <p align="center">
   <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/Python-3.12+-3776AB.svg?logo=python&logoColor=white" alt="Python 3.12+"></a>
+  <a href="https://nornir.readthedocs.io/"><img src="https://img.shields.io/badge/Nornir-3.4+-FF6B35.svg" alt="Nornir 3.4+"></a>
+  <a href="https://napalm.readthedocs.io/"><img src="https://img.shields.io/badge/NAPALM-5.0+-2ECC71.svg" alt="NAPALM 5.0+"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-green.svg" alt="License: MIT"></a>
-  <a href="https://github.com/sydasif/nornir-napalm-mcp/actions"><img src="https://img.shields.io/github/actions/workflow/status/sydasif/nornir-napalm-mcp/ci.yml?branch=main&label=tests" alt="Tests"></a>
   <a href="https://github.com/sydasif/nornir-napalm-mcp"><img src="https://img.shields.io/badge/code%20style-ruff-black" alt="Code style: ruff"></a>
 </p>
 
