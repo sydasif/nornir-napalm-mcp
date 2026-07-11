@@ -51,9 +51,8 @@ def _filter_devices(
     all_host_names = list(nr.inventory.hosts)
 
     if name:
-        if isinstance(name, str):
-            name = [name]
-        nr = nr.filter(filter_func=lambda h: h.name in name)
+        names = [name] if isinstance(name, str) else name
+        nr = nr.filter(filter_func=lambda h: h.name in names)
     if group:
         nr = nr.filter(filter_func=lambda h: group in [g.name for g in h.groups])
     if platform:

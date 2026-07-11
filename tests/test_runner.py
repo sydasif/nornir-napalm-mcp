@@ -78,11 +78,11 @@ class TestExpandConfigKey:
             "runner": {"plugin": "threaded"},
         }
         result = runner._expand_config(config, tmp_path)
-        inv = result["inventory"]["options"]
+        inv = result["inventory"]["options"]  # type: ignore[index]
         assert inv["host_file"] == str((tmp_path / "inventory" / "hosts.yaml").resolve())
         assert inv["group_file"] == str((tmp_path / "inventory" / "groups.yaml").resolve())
-        assert result["inventory"]["plugin"] == "SimpleInventory"
-        assert result["runner"]["plugin"] == "threaded"
+        assert result["inventory"]["plugin"] == "SimpleInventory"  # type: ignore[index]
+        assert result["runner"]["plugin"] == "threaded"  # type: ignore[index]
 
 
 class TestResolveConfigPath:

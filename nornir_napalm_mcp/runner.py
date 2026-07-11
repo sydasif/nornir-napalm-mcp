@@ -3,7 +3,7 @@
 import os
 import threading
 from pathlib import Path
-from typing import Any, overload
+from typing import Any
 
 import yaml
 from nornir import InitNornir
@@ -27,27 +27,11 @@ _init_lock = threading.Lock()
 _nornir_instance: Nornir | None = None
 
 
-@overload
-def _expand_config(value: str, config_dir: Path) -> str: ...
-
-
-@overload
-def _expand_config(value: dict[str, Any], config_dir: Path) -> dict[str, Any]: ...
-
-
-@overload
-def _expand_config(value: list[Any], config_dir: Path) -> list[Any]: ...
-
-
-@overload
-def _expand_config(value: object, config_dir: Path) -> object: ...
-
-
 def _expand_config(value: object, config_dir: Path) -> object:
     """Recursively expand ``~`` and ``$VAR`` in configuration strings.
 
     ``~`` and environment variables (``$HOME``, ``${VAR}``) are expanded in
-    all string values.  Only values belonging to known path keys (e.g.
+    all string values. Only values belonging to known path keys (e.g.
     ``host_file``) are additionally resolved against *config_dir* so that
     relative inventory paths work regardless of the server's working directory.
 
@@ -60,8 +44,7 @@ def _expand_config(value: object, config_dir: Path) -> object:
         The expanded value with the same type as *value*.
     """
     if isinstance(value, str):
-        expanded = os.path.expandvars(os.path.expanduser(value))
-        return expanded
+        return os.path.expandvars(os.path.expanduser(value))
     if isinstance(value, dict):
         return {k: _expand_config_key(k, v, config_dir) for k, v in value.items()}
     if isinstance(value, list):
