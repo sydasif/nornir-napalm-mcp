@@ -37,6 +37,16 @@ All operations are **read-only** — no configuration push is exposed.
 
 ---
 
+## Prerequisites
+
+| Requirement              | Version         | Notes                                                                                            |
+| ------------------------ | --------------- | ------------------------------------------------------------------------------------------------ |
+| Python                   | 3.12+           | Required for type hint syntax and pathlib improvements                                           |
+| uv                       | latest          | Recommended package manager ([install](https://docs.astral.sh/uv/getting-started/installation/)) |
+| NAPALM-supported devices | Vendor-specific | SSH, eAPI, or NETCONF access to target devices                                                   |
+
+---
+
 ## Setup
 
 ### Nornir configuration
@@ -88,7 +98,7 @@ Register this server with any MCP client (Claude Desktop, VS Code, etc.) by addi
       "command": "uvx",
       "args": [
         "--from",
-        "git+https://github.com/<your-user>/nornir-napalm-mcp",
+        "git+https://github.com/sydasif/nornir-napalm-mcp",
         "nornir-napalm-mcp"
       ],
       "env": {
@@ -130,46 +140,110 @@ Use `nornir_run_getter` with any of these:
 
 ---
 
-## Project Structure
+## Usage
+
+### List inventory
 
 ```bash
+uv run nornir-napalm-mcp --help
+```
+
+### Run as MCP server (STDIO)
+
+```bash
+NORNIR_CONFIG=/path/to/config.yaml uv run nornir-napalm-mcp
+```
+
+### Run as HTTP server
+
+```bash
+NORNIR_CONFIG=/path/to/config.yaml uv run nornir-napalm-mcp --transport http --host 0.0.0.0 --port 8000
+```
+
+### Run as Python module
+
+```bash
+NORNIR_CONFIG=/path/to/config.yaml uv run python -m nornir_napalm_mcp
+```
+
+---
+
+## Project Structure
+
+```
 nornir-napalm-mcp/
 ├── nornir_napalm_mcp/
 │   ├── __init__.py      # Package version
 │   ├── __main__.py      # python -m support
-│   ├── models.py        # Pydantic data models (InventoryDevice, GetterInfo)
-│   ├── runner.py        # Nornir initialization and caching
-│   └── server.py        # FastMCP server and tool definitions
+│   ├── models.py        # Pydantic data models (InventoryDevice, GetterInfo, HostResult)
+│   ├── runner.py        # Nornir initialization, config loading, and singleton caching
+│   └── server.py        # FastMCP server, tool definitions, and CLI entry point
 ├── tests/
-│   ├── conftest.py      # Fake Nornir stubs and fixtures
-│   └── test_helpers.py  # Unit tests for all tools
-├── pyproject.toml       # Build config, dependencies, tool settings
+│   ├── conftest.py      # Fake Nornir stubs and pytest fixtures
+│   ├── test_helpers.py  # Unit tests for all MCP tools and CLI entry point
+│   └── test_runner.py   # Unit tests for config loading and path expansion
+├── config.example.yaml  # Example Nornir configuration
+├── pyproject.toml       # Build config, dependencies, and tool settings
+├── uv.lock              # Locked dependencies
 └── README.md
 ```
 
 ---
 
-## Development
+## Contributing
+
+### Development workflow
 
 ```bash
+# Install dependencies
+uv sync
+
 # Run tests
 uv run pytest
+
+# Run tests with coverage
+uv run pytest --cov=nornir_napalm_mcp --cov-branch
 
 # Lint
 uv run ruff check .
 
+# Auto-fix lint issues
+uv run ruff check --fix .
+
+# Format
+uv run ruff format .
+
 # Type check (strict mode)
 uv run mypy .
+```
 
-# Build wheel
-uv build
+### Code standards
 
-# Install from GitHub with uvx
-uvx --from "git+https://github.com/<your-user>/nornir-napalm-mcp" nornir-napalm-mcp
+- **Python 3.12+** — use modern syntax (f-strings, `match`, `str.removeprefix`)
+- **Type hints** — required on all function signatures (`mypy --strict`)
+- **Docstrings** — Google-style with `Args:`, `Returns:`, `Raises:`
+- **Tests** — AAA pattern, one assertion per logical check, use `pytest` fixtures
+- **Linting** — `ruff` with `E`, `F`, `I`, `UP` rules
+
+### Commit conventions
+
+Use [Conventional Commits](https://www.conventionalcommits.org/):
+
+```
+feat(server): add nornir_ping tool
+fix(runner): handle missing NORNIR_CONFIG gracefully
+refactor: extract _run_nornir_task helper
+test: add runner config expansion tests
 ```
 
 ---
 
 ## Companion Lab
 
-- To test the tools, you can use the [netlab-demo](https://github.com/sydasif/netlab-demo.git) test lab with Cisco devices.
+Test against real devices using the [netlab-demo](https://github.com/sydasif/netlab-demo.git) test lab with Cisco devices via Containerlab.
+
+---
+
+## License
+
+MIT
