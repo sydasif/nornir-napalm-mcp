@@ -126,6 +126,23 @@ class TestLoadConfig:
         assert host_file == str((tmp_path / "my_inventory" / "hosts.yaml").resolve())
         del os.environ["TEST_INVENTORY_DIR"]
 
+    def test_non_dict_expansion_raises(self, tmp_path: Path) -> None:
+        """_load_config raises TypeError if expansion returns non-dict."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("inventory:\n  plugin: SimpleInventory\n")
+        # Patch _expand_config to return a scalar instead of a dict
+        original_expand = runner._expand_config
+
+        def fake_expand(value: object, config_dir: Path) -> str:
+            return "not-a-dict"
+
+        runner._expand_config = fake_expand
+        try:
+            with pytest.raises(TypeError, match="Expected dict"):
+                runner._load_config(config_file)
+        finally:
+            runner._expand_config = original_expand
+
 
 class TestGetNornir:
     """Tests for the singleton _get_nornir pattern."""

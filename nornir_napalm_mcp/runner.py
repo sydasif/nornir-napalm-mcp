@@ -101,7 +101,8 @@ def _load_config(config_path: Path) -> dict[str, Any]:
     """
     raw: dict[str, Any] = yaml.safe_load(config_path.read_text()) or {}
     result = _expand_config(raw, config_path.parent)
-    assert isinstance(result, dict)
+    if not isinstance(result, dict):
+        raise TypeError(f"Expected dict from config expansion, got {type(result).__name__}")
     return result
 
 
