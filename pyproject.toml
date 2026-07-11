@@ -25,6 +25,7 @@ dev = [
     "ruff",
     "mypy",
     "pytest-cov>=7.1.0",
+    "vulture>=2.16",
 ]
 
 [project.scripts]
@@ -65,7 +66,11 @@ filterwarnings = [
 
 [dependency-groups]
 dev = [
+    "bandit>=1.9.4",
     "fastmcp>=3.3.1",
+    "mypy>=2.1.0",
     "pytest>=9.0.3",
     "pytest-cov>=7.1.0",
+    "ruff>=0.15.15",
+    "vulture>=2.16",
 ]

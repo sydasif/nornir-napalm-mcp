@@ -12,7 +12,7 @@ from nornir_napalm_mcp.runner import _get_nornir, reset_nornir
 
 if TYPE_CHECKING:
     from nornir.core import Nornir
-    from nornir.core.task import AggregatedResult
+    from nornir.core.task import AggregatedResult  # noqa: F401 - used in type hints
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("nornir-napalm-mcp")
