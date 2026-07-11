@@ -3,7 +3,7 @@
 import os
 import threading
 from pathlib import Path
-from typing import Any
+from typing import Any, overload
 
 import yaml
 from nornir import InitNornir
@@ -25,6 +25,22 @@ _PATH_KEYS = frozenset(
 # first callers can't race to build two separate instances.
 _init_lock = threading.Lock()
 _nornir_instance: Nornir | None = None
+
+
+@overload
+def _expand_config(value: str, config_dir: Path) -> str: ...
+
+
+@overload
+def _expand_config(value: dict[str, Any], config_dir: Path) -> dict[str, Any]: ...
+
+
+@overload
+def _expand_config(value: list[Any], config_dir: Path) -> list[Any]: ...
+
+
+@overload
+def _expand_config(value: object, config_dir: Path) -> object: ...
 
 
 def _expand_config(value: object, config_dir: Path) -> object:
@@ -100,8 +116,10 @@ def _load_config(config_path: Path) -> dict[str, Any]:
     Returns:
         A dictionary suitable for passing as ``**kwargs`` to ``InitNornir``.
     """
-    config = yaml.safe_load(config_path.read_text()) or {}
-    return _expand_config(config, config_path.parent)  # type: ignore[return-value]
+    raw: dict[str, Any] = yaml.safe_load(config_path.read_text()) or {}
+    result = _expand_config(raw, config_path.parent)
+    assert isinstance(result, dict)
+    return result
 
 
 def _get_nornir() -> Nornir:
