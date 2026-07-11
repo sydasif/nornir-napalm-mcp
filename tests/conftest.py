@@ -87,18 +87,14 @@ class FakeNornir:
     def filter(
         self,
         name: str | None = None,
-        name__in: list[str] | None = None,
         filter_func: Any = None,
         platform: str | None = None,
     ) -> FakeNornir:
-        """Filter hosts by name, list of names, filter_func, or platform."""
+        """Filter hosts by name, filter_func, or platform."""
         filtered = dict(self.inventory.hosts._hosts)
 
         if filter_func is not None:
             filtered = {k: v for k, v in filtered.items() if filter_func(v)}
-
-        if name__in is not None:
-            filtered = {k: v for k, v in filtered.items() if k in name__in}
 
         if name is not None:
             host = filtered.get(name)

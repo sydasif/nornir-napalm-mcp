@@ -5,6 +5,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from fastmcp import FastMCP
+from nornir_napalm.plugins.tasks import napalm_cli, napalm_get
 
 from nornir_napalm_mcp.models import GetterInfo, HostResult, InventoryDevice
 from nornir_napalm_mcp.runner import _get_nornir, reset_nornir
@@ -66,6 +67,30 @@ def _filter_devices(
         )
 
     return nr
+
+
+def _run_nornir_task(
+    task: Any,
+    name: str | list[str] | None = None,
+    group: str | None = None,
+    platform: str | None = None,
+    **task_kwargs: Any,
+) -> dict[str, HostResult]:
+    """Run a Nornir task against filtered devices and return HostResult dict.
+
+    Args:
+        task: The Nornir task function to execute (e.g., napalm_get, napalm_cli).
+        name: Device name or list of names to target.
+        group: Group name to filter devices by.
+        platform: Platform name to filter devices by.
+        **task_kwargs: Additional keyword arguments passed to the task.
+
+    Returns:
+        A dictionary mapping each device name to a HostResult.
+    """
+    nr = _filter_devices(_get_nornir(), name=name, group=group, platform=platform)
+    result = nr.run(task=task, **task_kwargs)
+    return _result_to_dict(result)
 
 
 def _result_to_dict(result: "AggregatedResult") -> dict[str, HostResult]:
@@ -141,11 +166,10 @@ def nornir_get_facts(
     Raises:
         ValueError: If no devices match the provided filters.
     """
-    from nornir_napalm.plugins.tasks import napalm_get
 
-    nr = _filter_devices(_get_nornir(), name=name, group=group, platform=platform)
-    result = nr.run(task=napalm_get, getters=["facts"])
-    return _result_to_dict(result)
+    return _run_nornir_task(
+        napalm_get, name=name, group=group, platform=platform, getters=["facts"]
+    )
 
 
 @mcp.tool()
@@ -176,13 +200,16 @@ def nornir_run_getter(
     Raises:
         ValueError: If no devices match the provided filters.
     """
-    from nornir_napalm.plugins.tasks import napalm_get
-
-    nr = _filter_devices(_get_nornir(), name=name, group=group, platform=platform)
 
     g_opts = {getter: getter_options} if getter_options else None
-    result = nr.run(task=napalm_get, getters=[getter], getters_options=g_opts)
-    return _result_to_dict(result)
+    return _run_nornir_task(
+        napalm_get,
+        name=name,
+        group=group,
+        platform=platform,
+        getters=[getter],
+        getters_options=g_opts,
+    )
 
 
 @mcp.tool()
@@ -216,9 +243,6 @@ def nornir_get_config(
     Raises:
         ValueError: If no devices match the provided filters.
     """
-    from nornir_napalm.plugins.tasks import napalm_get
-
-    nr = _filter_devices(_get_nornir(), name=name, group=group, platform=platform)
 
     getter_options = {
         "config": {
@@ -228,9 +252,14 @@ def nornir_get_config(
             "format": format,
         }
     }
-
-    result = nr.run(task=napalm_get, getters=["config"], getters_options=getter_options)
-    return _result_to_dict(result)
+    return _run_nornir_task(
+        napalm_get,
+        name=name,
+        group=group,
+        platform=platform,
+        getters=["config"],
+        getters_options=getter_options,
+    )
 
 
 @mcp.tool()
@@ -259,11 +288,10 @@ def nornir_run_cli(
     Raises:
         ValueError: If no devices match the provided filters.
     """
-    from nornir_napalm.plugins.tasks import napalm_cli
 
-    nr = _filter_devices(_get_nornir(), name=name, group=group, platform=platform)
-    result = nr.run(task=napalm_cli, commands=commands)
-    return _result_to_dict(result)
+    return _run_nornir_task(
+        napalm_cli, name=name, group=group, platform=platform, commands=commands
+    )
 
 
 @mcp.tool()
