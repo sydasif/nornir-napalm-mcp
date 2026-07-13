@@ -175,9 +175,10 @@ nornir-napalm-mcp/
 ├── nornir_napalm_mcp/
 │   ├── __init__.py      # Package version
 │   ├── __main__.py      # python -m support
+│   ├── main.py          # CLI entry point (argparse, transport selection)
 │   ├── models.py        # Pydantic data models (InventoryDevice, GetterInfo, HostResult)
 │   ├── runner.py        # Nornir initialization, config loading, and singleton caching
-│   └── server.py        # FastMCP server, tool definitions, and CLI entry point
+│   └── server.py        # FastMCP server instance and tool definitions
 ├── tests/
 │   ├── conftest.py      # Fake Nornir stubs and pytest fixtures
 │   ├── test_helpers.py  # Unit tests for all MCP tools and CLI entry point
