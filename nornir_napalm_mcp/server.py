@@ -1,6 +1,8 @@
-"""Nornir-NAPALM FastMCP Server."""
+"""Nornir-NAPALM FastMCP Server — tool definitions only.
 
-import argparse
+The FastMCP instance and CLI entry point live in ``main.py``.
+"""
+
 import logging
 from typing import TYPE_CHECKING, Any
 
@@ -14,7 +16,6 @@ if TYPE_CHECKING:
     from nornir.core import Nornir
     from nornir.core.task import AggregatedResult  # noqa: F401 - used in type hints
 
-logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("nornir-napalm-mcp")
 
 mcp = FastMCP(
@@ -334,20 +335,3 @@ def nornir_reload_inventory() -> None:
     Use after editing the inventory files to pick up changes.
     """
     reset_nornir()
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--transport", choices=["stdio", "http"], default="stdio")
-    parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=8000)
-    args = parser.parse_args()
-
-    if args.transport == "http":
-        mcp.run(transport="http", host=args.host, port=args.port)
-    else:
-        mcp.run(transport="stdio")
-
-
-if __name__ == "__main__":
-    main()

@@ -20,7 +20,7 @@ dependencies = [
 ]
 
 [project.scripts]
-nornir-napalm-mcp = "nornir_napalm_mcp.server:main"
+nornir-napalm-mcp = "nornir_napalm_mcp.main:main"
 
 [tool.hatch.version]
 path = "nornir_napalm_mcp/__init__.py"
