@@ -106,7 +106,7 @@ def _load_config(config_path: Path) -> dict[str, Any]:
     return result
 
 
-def _get_nornir() -> Nornir:
+def get_nornir() -> Nornir:
     """Return the process-wide Nornir singleton, initializing it if needed.
 
     The configuration file path is read from the ``NORNIR_CONFIG`` environment

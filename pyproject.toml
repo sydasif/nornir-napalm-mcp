@@ -19,15 +19,6 @@ dependencies = [
     "paramiko<5.0.0",
 ]
 
-[project.optional-dependencies]
-dev = [
-    "pytest>=7.0",
-    "ruff",
-    "mypy",
-    "pytest-cov>=7.1.0",
-    "vulture>=2.16",
-]
-
 [project.scripts]
 nornir-napalm-mcp = "nornir_napalm_mcp.server:main"
 

@@ -14,6 +14,7 @@ build/
 .mypy_cache/
 .ruff_cache/
 .coverage
+htmlcov/
 coverage.xml
 .DS_Store
 *.pdf

@@ -152,8 +152,8 @@ class TestGetNornir:
     ) -> None:
         """Multiple _get_nornir calls return the same object."""
         runner.reset_nornir()
-        nr1 = runner._get_nornir()
-        nr2 = runner._get_nornir()
+        nr1 = runner.get_nornir()
+        nr2 = runner.get_nornir()
         assert nr1 is nr2
 
     def test_reset_creates_new_instance(
@@ -161,7 +161,7 @@ class TestGetNornir:
     ) -> None:
         """reset_nornir() causes next _get_nornir() to create a fresh instance."""
         runner.reset_nornir()
-        nr1 = runner._get_nornir()
+        nr1 = runner.get_nornir()
         runner.reset_nornir()
-        nr2 = runner._get_nornir()
+        nr2 = runner.get_nornir()
         assert nr1 is not nr2

@@ -79,7 +79,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Companion Projects
 
-- **nornir-mcp-lab** (`~/Documents/nornir-mcp-lab`): Containerlab test lab with real Cisco CSR1000v + Arista cEOS devices. Deploy with `containerlab deploy -t lab.clab.yaml`. Its `.mcp.json` registers this server with `NORNIR_CONFIG` pointing to the lab's inventory. Use it for integration testing against live devices.
+- **netlab-demo** (`~/Documents/netlab-demo`): Containerlab test lab with real Cisco CSR1000v + Arista cEOS devices. Deploy with `containerlab deploy -t lab.clab.yaml`. Its `.mcp.json` registers this server with `NORNIR_CONFIG` pointing to the lab's inventory. Use it for integration testing against live devices.
 
 ## Error Handling Conventions
 

@@ -8,7 +8,7 @@ from fastmcp import FastMCP
 from nornir_napalm.plugins.tasks import napalm_cli, napalm_get
 
 from nornir_napalm_mcp.models import GetterInfo, HostResult, InventoryDevice
-from nornir_napalm_mcp.runner import _get_nornir, reset_nornir
+from nornir_napalm_mcp.runner import get_nornir, reset_nornir
 
 if TYPE_CHECKING:
     from nornir.core import Nornir
@@ -87,7 +87,7 @@ def _run_nornir_task(
     Returns:
         A dictionary mapping each device name to a HostResult.
     """
-    nr = _filter_devices(_get_nornir(), name=name, group=group, platform=platform)
+    nr = _filter_devices(get_nornir(), name=name, group=group, platform=platform)
     result = nr.run(task=task, **task_kwargs)
     return _result_to_dict(result)
 
@@ -128,7 +128,7 @@ def nornir_list_inventory() -> list[InventoryDevice]:
         A sorted list of InventoryDevice objects, each containing
         the device name, hostname, platform, and group membership.
     """
-    nr = _get_nornir()
+    nr = get_nornir()
     return [
         InventoryDevice(
             name=host.name,
@@ -306,7 +306,7 @@ def nornir_list_getters() -> list[GetterInfo]:
     """
     import napalm
 
-    nr = _get_nornir()
+    nr = get_nornir()
     platforms = {str(host.platform) for host in nr.inventory.hosts.values()}
 
     results = []

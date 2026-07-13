@@ -179,10 +179,10 @@ def test_list_getters_unknown_platform_returns_empty(monkeypatch: pytest.MonkeyP
 
 def test_reload_inventory() -> None:
     """Verify inventory reload clears the cache."""
-    runner._get_nornir()
+    runner.get_nornir()
     server.nornir_reload_inventory()
-    # After reload, calling _get_nornir should create a new instance
-    nr = runner._get_nornir()
+    # After reload, calling get_nornir() should create a new instance
+    nr = runner.get_nornir()
     assert nr is not None
 
 
