@@ -2,10 +2,12 @@
 
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class InventoryDevice(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     name: str
     hostname: str
     platform: str
@@ -13,6 +15,8 @@ class InventoryDevice(BaseModel):
 
 
 class GetterInfo(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     platform: str
     getters: list[str]
 
@@ -24,6 +28,8 @@ class HostResult(BaseModel):
     on callers to duck-type whether a given host's entry is real getter
     data or an error description.
     """
+
+    model_config = ConfigDict(frozen=True)
 
     ok: bool
     data: Any | None = None

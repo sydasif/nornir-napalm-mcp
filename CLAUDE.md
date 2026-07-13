@@ -31,7 +31,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Local dev (MCP Inspector): `fastmcp dev nornir_napalm_mcp/server.py`
 - Claude Desktop install: `fastmcp install nornir_napalm_mcp/server.py`
 - Run STDIO transport: `nornir-napalm-mcp --transport stdio`
-- Run SSE transport: `nornir-napalm-mcp --transport sse --host 0.0.0.0 --port 8000`
+- Run HTTP transport: `nornir-napalm-mcp --transport http --host 0.0.0.0 --port 8000`
 
 ## Code Architecture
 
@@ -42,7 +42,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `__init__.py` - Package version (`__version__`)
 - `__main__.py` - Supports `python -m nornir_napalm_mcp`
 - `models.py` - Pydantic data models (`InventoryDevice`, `GetterInfo`)
-- `runner.py` - Nornir initialization, config loading, caching (`_get_nornir()`, `reset_nornir()`)
+- `runner.py` - Nornir initialization, config loading, caching (`get_nornir()`, `reset_nornir()`)
 - `server.py` - FastMCP server, 7 MCP tools, `main()` entry point
 
 **Testing Approach** (`tests/` directory):
@@ -55,11 +55,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Key Design Patterns
 
-1. **Lazy Initialization**: Nornir instance is created only when first needed (`_get_nornir()`), allowing server to start even with broken inventory
-2. **Singleton Caching**: `lru_cache(maxsize=1)` ensures single Nornir instance reused across requests
+1. **Lazy Initialization**: Nornir instance is created only when first needed (`get_nornir()`), allowing server to start even with broken inventory
+2. **Singleton Caching**: Module-level `_nornir_instance` guarded by `_init_lock` ensures a single Nornir instance reused across requests
 3. **Device Filtering**: `_filter_devices()` provides consistent name/group/platform filtering across all tools
 4. **Configuration Override**: `NORNIR_CONFIG` environment variable allows custom config paths
-5. **Transport Flexibility**: Supports both STDIO (Claude Desktop) and SSE (network) transports
+5. **Transport Flexibility**: Supports both STDIO (Claude Desktop) and HTTP (network) transports
 6. **Installable Package**: Proper Python package structure for `uvx` execution from GitHub
 
 ### Data Flow

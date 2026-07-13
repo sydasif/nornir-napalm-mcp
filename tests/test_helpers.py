@@ -65,7 +65,7 @@ def test_get_facts_by_platform() -> None:
 
 def test_get_facts_no_match_raises() -> None:
     """Verify nornir_get_facts raises ValueError when no devices match."""
-    with pytest.raises(ValueError, match="No devices match filters"):
+    with pytest.raises(ValueError, match="No devices match the provided filters"):
         server.nornir_get_facts(name="nonexistent")
 
 
@@ -189,7 +189,7 @@ def test_reload_inventory() -> None:
 def test_filter_devices_empty_raises() -> None:
     """Verify _filter_devices raises ValueError when no devices match."""
     nr = FakeNornir(FakeInventory(FakeHosts({})))
-    with pytest.raises(ValueError, match="No devices match filters"):
+    with pytest.raises(ValueError, match="No devices match the provided filters"):
         server._filter_devices(nr, name="nonexistent")  # type: ignore[arg-type]
 
 

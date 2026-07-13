@@ -4,6 +4,7 @@ The FastMCP instance and CLI entry point live in ``main.py``.
 """
 
 import logging
+from collections.abc import Iterable
 from typing import TYPE_CHECKING, Any
 
 from fastmcp import FastMCP
@@ -14,6 +15,7 @@ from nornir_napalm_mcp.runner import get_nornir, reset_nornir
 
 if TYPE_CHECKING:
     from nornir.core import Nornir
+    from nornir.core.inventory import Host
     from nornir.core.task import AggregatedResult  # noqa: F401 - used in type hints
 
 log = logging.getLogger("nornir-napalm-mcp")
@@ -22,6 +24,20 @@ mcp = FastMCP(
     name="Nornir-NAPALM Server",
     instructions="Query network devices via NAPALM. Call nornir_list_inventory first.",
 )
+
+
+if TYPE_CHECKING:
+    from nornir.core.inventory import Host
+
+
+def _host_matches_name(host: "Host", names: Iterable[str]) -> bool:
+    """Filter function to match host by name."""
+    return host.name in names
+
+
+def _host_matches_group(host: "Host", group: str) -> bool:
+    """Filter function to match host by group."""
+    return group in [g.name for g in host.groups]
 
 
 def _filter_devices(
@@ -47,23 +63,18 @@ def _filter_devices(
     Raises:
         ValueError: If no devices match the provided filters.
     """
-    # Capture the pre-filter host names up front so the error message below
-    # doesn't need a second, separate fetch of the global Nornir instance.
-    all_host_names = list(nr.inventory.hosts)
-
     if name:
-        names = [name] if isinstance(name, str) else name
-        nr = nr.filter(filter_func=lambda h: h.name in names)
+        names = {name} if isinstance(name, str) else set(name)
+        nr = nr.filter(filter_func=lambda h: _host_matches_name(h, names))
     if group:
-        nr = nr.filter(filter_func=lambda h: group in [g.name for g in h.groups])
+        nr = nr.filter(filter_func=lambda h: _host_matches_group(h, group))
     if platform:
         nr = nr.filter(platform=platform)
 
     if not nr.inventory.hosts:
-        available = ", ".join(sorted(all_host_names)) or "(none)"
         raise ValueError(
-            f"No devices match filters (name={name}, group={group}, platform={platform}). "
-            f"Available devices: {available}. Call nornir_list_inventory."
+            "No devices match the provided filters. "
+            "Call nornir_list_inventory to see available devices."
         )
 
     return nr
@@ -121,6 +132,11 @@ def _result_to_dict(result: "AggregatedResult") -> dict[str, HostResult]:
     return output
 
 
+def _host_name_key(host: "Host") -> str:
+    """Sort key function for hosts by name."""
+    return host.name
+
+
 @mcp.tool()
 def nornir_list_inventory() -> list[InventoryDevice]:
     """Lists all devices in the Nornir inventory.
@@ -137,7 +153,7 @@ def nornir_list_inventory() -> list[InventoryDevice]:
             platform=str(host.platform),
             groups=[g.name for g in host.groups],
         )
-        for host in sorted(nr.inventory.hosts.values(), key=lambda h: h.name)
+        for host in sorted(nr.inventory.hosts.values(), key=_host_name_key)
     ]
 
 

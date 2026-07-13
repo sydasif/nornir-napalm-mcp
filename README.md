@@ -33,7 +33,7 @@ All operations are **read-only** — no configuration push is exposed.
 - **Lazy initialization** — server starts even with a broken inventory, exposing the tool catalogue for inspection.
 - **Singleton caching** — Nornir instance is initialized once and reused across requests.
 - **Flexible filtering** — filter by device name, group, or platform on any tool.
-- **SSE and STDIO transport** — run locally for Claude Desktop or expose over HTTP.
+- **HTTP and STDIO transport** — run locally for Claude Desktop or expose over HTTP.
 
 ---
 

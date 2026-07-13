@@ -147,18 +147,14 @@ class TestLoadConfig:
 class TestGetNornir:
     """Tests for the singleton _get_nornir pattern."""
 
-    def test_singleton_same_instance(
-        self, fake_nornir: dict[str, FakeHost], monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_singleton_same_instance(self, fake_nornir: dict[str, FakeHost]) -> None:
         """Multiple _get_nornir calls return the same object."""
         runner.reset_nornir()
         nr1 = runner.get_nornir()
         nr2 = runner.get_nornir()
         assert nr1 is nr2
 
-    def test_reset_creates_new_instance(
-        self, fake_nornir: dict[str, FakeHost], monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_reset_creates_new_instance(self, fake_nornir: dict[str, FakeHost]) -> None:
         """reset_nornir() causes next _get_nornir() to create a fresh instance."""
         runner.reset_nornir()
         nr1 = runner.get_nornir()

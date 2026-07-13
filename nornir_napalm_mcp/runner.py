@@ -1,7 +1,7 @@
 """Nornir initialization for the MCP Server."""
 
 import os
-import threading
+from functools import cache
 from pathlib import Path
 from typing import Any
 
@@ -11,7 +11,7 @@ from nornir.core import Nornir
 
 # Keys whose string values are file paths that should be resolved relative
 # to the config file directory.
-_PATH_KEYS = frozenset(
+_PATH_KEYS: frozenset[str] = frozenset(
     {
         "host_file",
         "group_file",
@@ -21,10 +21,29 @@ _PATH_KEYS = frozenset(
     }
 )
 
-# Guards initialization of the module-level Nornir singleton so concurrent
-# first callers can't race to build two separate instances.
-_init_lock = threading.Lock()
-_nornir_instance: Nornir | None = None
+
+@cache
+def get_nornir() -> Nornir:
+    """Return the process-wide Nornir singleton, initializing it if needed.
+
+    The configuration file path is read from the ``NORNIR_CONFIG`` environment
+    variable. ``~`` and ``$VAR`` are expanded in the config path itself, and
+    inside ``config.yaml`` all string values have ``~``, ``$VAR``, and
+    environment-variable references expanded. Known path keys are resolved
+    against the *config.yaml* directory rather than the process working
+    directory.
+
+    Uses an ``lru_cache`` to ensure single initialization so that concurrent
+    first callers don't race to build separate Nornir instances.
+    """
+    config_path = _resolve_config_path()
+    expanded = _load_config(config_path)
+    return InitNornir(**expanded)
+
+
+def reset_nornir() -> None:
+    """Clear the cached Nornir instance so the next call reloads from disk."""
+    get_nornir.cache_clear()
 
 
 def _expand_config(value: object, config_dir: Path) -> object:
@@ -43,13 +62,15 @@ def _expand_config(value: object, config_dir: Path) -> object:
     Returns:
         The expanded value with the same type as *value*.
     """
-    if isinstance(value, str):
-        return os.path.expandvars(os.path.expanduser(value))
-    if isinstance(value, dict):
-        return {k: _expand_config_key(k, v, config_dir) for k, v in value.items()}
-    if isinstance(value, list):
-        return [_expand_config(v, config_dir) for v in value]
-    return value
+    match value:
+        case str():
+            return os.path.expandvars(os.path.expanduser(value))
+        case dict():
+            return {k: _expand_config_key(k, v, config_dir) for k, v in value.items()}
+        case list():
+            return [_expand_config(v, config_dir) for v in value]
+        case _:
+            return value
 
 
 def _expand_config_key(key: str, value: object, config_dir: Path) -> object:
@@ -81,7 +102,7 @@ def _resolve_config_path() -> Path:
     config_path = Path(os.path.expandvars(config_env)).expanduser().resolve()
     if not config_path.exists():
         raise FileNotFoundError(
-            f"Nornir config file not found at path specified by NORNIR_CONFIG: {config_path}"
+            "Nornir config file not found. Verify NORNIR_CONFIG points to a valid config.yaml."
         )
     return config_path
 
@@ -104,34 +125,3 @@ def _load_config(config_path: Path) -> dict[str, Any]:
     if not isinstance(result, dict):
         raise TypeError(f"Expected dict from config expansion, got {type(result).__name__}")
     return result
-
-
-def get_nornir() -> Nornir:
-    """Return the process-wide Nornir singleton, initializing it if needed.
-
-    The configuration file path is read from the ``NORNIR_CONFIG`` environment
-    variable. ``~`` and ``$VAR`` are expanded in the config path itself, and
-    inside ``config.yaml`` all string values have ``~``, ``$VAR``, and
-    environment-variable references expanded. Known path keys are resolved
-    against the *config.yaml* directory rather than the process working
-    directory.
-
-    Uses double-checked locking so that concurrent first callers (e.g. from
-    multiple in-flight tool calls) don't race to build separate Nornir
-    instances.
-    """
-    global _nornir_instance
-    if _nornir_instance is None:
-        with _init_lock:
-            if _nornir_instance is None:
-                config_path = _resolve_config_path()
-                expanded = _load_config(config_path)
-                _nornir_instance = InitNornir(**expanded)
-    return _nornir_instance
-
-
-def reset_nornir() -> None:
-    """Clear the cached Nornir instance so the next call reloads from disk."""
-    global _nornir_instance
-    with _init_lock:
-        _nornir_instance = None
