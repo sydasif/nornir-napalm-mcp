@@ -54,24 +54,27 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `test_helpers.py` - Unit tests covering all MCP tools with mocked Nornir responses
 - Tests use monkeypatching to replace `InitNornir` with fake inventory
 - Test data includes spine-01 and leaf-01 devices for consistent assertions
+- **`FakeNornir` must model the `GlobalState.data` surface** — since `tasks.run_nornir_task()` calls `nr.data.reset_failed_hosts()`, `FakeNornir` carries a `data: FakeGlobalState` attribute (with a `reset_failed_hosts()` method). When touching `run_nornir_task`, keep `FakeGlobalState` in sync with what production code invokes on `nr.data`.
 - **Gotcha**: `nr.filter(name__in=[...])` silently returns empty in Nornir 3.5.0. Use `nr.filter(filter_func=lambda h: h.name in [...])` instead. The `FakeNornir` in `conftest.py` supports both, but real Nornir only handles `filter_func` correctly for hostname matching. Always verify filter changes against a real Nornir instance.
 
 ### Key Design Patterns
 
 1. **Lazy Initialization**: Nornir instance is created only when first needed (`get_nornir()`), allowing server to start even with broken inventory
-2. **Singleton Caching**: Module-level `_nornir_instance` guarded by `_init_lock` ensures a single Nornir instance reused across requests
-3. **Device Filtering**: `_filter_devices()` provides consistent name/group/platform filtering across all tools
-4. **Configuration Override**: `NORNIR_CONFIG` environment variable allows custom config paths
-5. **Transport Flexibility**: Supports both STDIO (Claude Desktop) and HTTP (network) transports
-6. **Installable Package**: Proper Python package structure for `uvx` execution from GitHub
+2. **Singleton Caching**: Module-level `@cache` on `get_nornir()` ensures a single Nornir instance reused across requests, avoiding repeated YAML parsing and connection setup
+3. **Failed-device Reset**: `nr.data.reset_failed_hosts()` is called before every task. Nornir quarantines hosts that fail in `GlobalState.failed_hosts` (in `nornir/core/__init__.py:151`). In a long-lived singleton server this persists across calls; the reset makes every request start with all devices available, matching the behavior of a one-shot script (`InitNornir()` fresh per invocation)
+4. **Device Filtering**: `_filter_devices()` provides consistent name/group/platform filtering across all tools
+5. **Configuration Override**: `NORNIR_CONFIG` environment variable allows custom config paths
+6. **Transport Flexibility**: Supports both STDIO (Claude Desktop) and HTTP (network) transports
+7. **Installable Package**: Proper Python package structure for `uvx` execution from GitHub
 
 ### Data Flow
 
 1. MCP tool called with name/group/platform filters
-2. `tasks.run_nornir_task()` → `_filter_devices()` narrows inventory to matching devices
-3. NAPALM task executed via Nornir's `nr.run()`
-4. `_result_to_dict()` normalizes `AggregatedResult` → `dict[str, HostResult]`
-5. FastMCP automatically serializes to JSON
+2. `tasks.run_nornir_task()` resets `failed_hosts` via `nr.data.reset_failed_hosts()`
+3. `tasks._filter_devices()` narrows inventory to matching devices
+4. NAPALM task executed via Nornir's `nr.run()`
+5. `_result_to_dict()` normalizes `AggregatedResult` → `dict[str, HostResult]`
+6. FastMCP automatically serializes to JSON
 
 ### Type Design
 

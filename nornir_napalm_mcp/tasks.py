@@ -82,6 +82,8 @@ def run_nornir_task(
     Returns:
         A dictionary mapping each device name to a HostResult.
     """
-    nr = _filter_devices(get_nornir(), name=name, group=group, platform=platform)
+    nr = get_nornir()
+    nr.data.reset_failed_hosts()
+    nr = _filter_devices(nr, name=name, group=group, platform=platform)
     result = nr.run(task=task, **task_kwargs)
     return _result_to_dict(result)

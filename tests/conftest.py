@@ -79,10 +79,22 @@ class FakeHostResult:
 
 
 @dataclass(slots=True)
+class FakeGlobalState:
+    """Stub for Nornir's GlobalState — only the surface tasks.py touches."""
+
+    failed_hosts: set[str] = field(default_factory=set)
+
+    def reset_failed_hosts(self) -> None:
+        """Mirror GlobalState.reset_failed_hosts."""
+        self.failed_hosts = set()
+
+
+@dataclass(slots=True)
 class FakeNornir:
     """Stub for Nornir instance."""
 
     inventory: FakeInventory
+    data: FakeGlobalState = field(default_factory=FakeGlobalState)
 
     def filter(
         self,

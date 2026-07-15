@@ -31,7 +31,7 @@ All operations are **read-only** — no configuration push is exposed.
 | `nornir_reload_inventory` | Re-read YAML inventory from disk                                            |
 
 - **Lazy initialization** — server starts even with a broken inventory, exposing the tool catalogue for inspection.
-- **Singleton caching** — Nornir instance is initialized once and reused across requests.
+- **Singleton caching** — Nornir instance is initialized once and reused across requests. Failed-device quarantine (`failed_hosts`) is reset before every call so dropped devices are available again on the next request.
 - **Flexible filtering** — filter by device name, group, or platform on any tool.
 - **HTTP and STDIO transport** — run locally for Claude Desktop or expose over HTTP.
 
