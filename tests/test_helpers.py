@@ -12,6 +12,7 @@ import pytest
 
 from nornir_napalm_mcp import runner, server
 from nornir_napalm_mcp.models import HostResult
+from nornir_napalm_mcp.tasks import _filter_devices
 from tests.conftest import FakeGroup, FakeHost, FakeHosts, FakeInventory, FakeNornir
 
 
@@ -190,7 +191,7 @@ def test_filter_devices_empty_raises() -> None:
     """Verify _filter_devices raises ValueError when no devices match."""
     nr = FakeNornir(FakeInventory(FakeHosts({})))
     with pytest.raises(ValueError, match="No devices match the provided filters"):
-        server._filter_devices(nr, name="nonexistent")  # type: ignore[arg-type]
+        _filter_devices(nr, name="nonexistent")
 
 
 def test_filter_devices_by_name_list() -> None:
@@ -200,8 +201,8 @@ def test_filter_devices_by_name_list() -> None:
         "b": FakeHost(name="b", hostname="10.0.0.2", platform="eos", groups=[]),
     }
     nr = FakeNornir(FakeInventory(FakeHosts(hosts)))
-    filtered = server._filter_devices(nr, name=["a"])  # type: ignore[arg-type]
-    assert set(filtered.inventory.hosts._hosts.keys()) == {"a"}  # type: ignore[attr-defined]
+    filtered = _filter_devices(nr, name=["a"])
+    assert set(filtered.inventory.hosts._hosts.keys()) == {"a"}
 
 
 def test_filter_devices_by_group() -> None:
@@ -221,8 +222,8 @@ def test_filter_devices_by_group() -> None:
         ),
     }
     nr = FakeNornir(FakeInventory(FakeHosts(hosts)))
-    filtered = server._filter_devices(nr, group="core")  # type: ignore[arg-type]
-    assert set(filtered.inventory.hosts._hosts.keys()) == {"r1"}  # type: ignore[attr-defined]
+    filtered = _filter_devices(nr, group="core")
+    assert set(filtered.inventory.hosts._hosts.keys()) == {"r1"}
 
 
 def test_filter_devices_by_platform() -> None:
@@ -232,8 +233,8 @@ def test_filter_devices_by_platform() -> None:
         "r2": FakeHost(name="r2", hostname="10.0.0.2", platform="ios", groups=[]),
     }
     nr = FakeNornir(FakeInventory(FakeHosts(hosts)))
-    filtered = server._filter_devices(nr, platform="eos")  # type: ignore[arg-type]
-    assert set(filtered.inventory.hosts._hosts.keys()) == {"r1"}  # type: ignore[attr-defined]
+    filtered = _filter_devices(nr, platform="eos")
+    assert set(filtered.inventory.hosts._hosts.keys()) == {"r1"}
 
 
 def test_list_inventory_empty(monkeypatch: pytest.MonkeyPatch) -> None:

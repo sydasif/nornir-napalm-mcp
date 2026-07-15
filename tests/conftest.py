@@ -15,14 +15,14 @@ _TEST_CONFIG = Path("/tmp/nornir_test_config.yaml")
 _TEST_CONFIG.touch(exist_ok=True)
 
 
-@dataclass
+@dataclass(slots=True)
 class FakeGroup:
     """Stub for Nornir Group."""
 
     name: str
 
 
-@dataclass
+@dataclass(slots=True)
 class FakeHost:
     """Stub for Nornir Host."""
 
@@ -32,7 +32,7 @@ class FakeHost:
     groups: list[FakeGroup] = field(default_factory=list)
 
 
-@dataclass
+@dataclass(slots=True)
 class FakeHosts:
     """Minimal mapping implementing the inventory.hosts surface area."""
 
@@ -48,14 +48,14 @@ class FakeHosts:
         return len(self._hosts)
 
 
-@dataclass
+@dataclass(slots=True)
 class FakeInventory:
     """Stub for Nornir Inventory."""
 
     hosts: FakeHosts
 
 
-@dataclass
+@dataclass(slots=True)
 class FakeTaskResult:
     """Stub for Nornir TaskResult."""
 
@@ -64,7 +64,7 @@ class FakeTaskResult:
     exception: Any = None
 
 
-@dataclass
+@dataclass(slots=True)
 class FakeHostResult:
     """Per-host result wrapper so _result_to_dict can access .failed and [0]."""
 
@@ -78,7 +78,7 @@ class FakeHostResult:
         return self.tasks[idx]
 
 
-@dataclass
+@dataclass(slots=True)
 class FakeNornir:
     """Stub for Nornir instance."""
 

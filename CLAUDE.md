@@ -41,9 +41,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - `__init__.py` - Package version (`__version__`)
 - `__main__.py` - Supports `python -m nornir_napalm_mcp`
-- `models.py` - Pydantic data models (`InventoryDevice`, `GetterInfo`)
-- `runner.py` - Nornir initialization, config loading, caching (`get_nornir()`, `reset_nornir()`)
-- `server.py` - FastMCP server, 7 MCP tools, `main()` entry point
+- `models.py` - Pydantic data models (`InventoryDevice`, `GetterInfo`, `HostResult`)
+- `runner.py` - Nornir initialization, config loading, caching (`get_nornir()`, `reset_nornir()`); exports `NornirLike` protocol
+- `tasks.py` - Task helpers: `_filter_devices()`, `run_nornir_task()`, `_result_to_dict()`
+- `introspection.py` - NAPALM getter discovery per platform (`list_getters()`)
+- `server.py` - FastMCP server instance and the 7 `@mcp.tool()` definitions
+- `py.typed` - PEP 561 marker for downstream type checking
 
 **Testing Approach** (`tests/` directory):
 
@@ -65,10 +68,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ### Data Flow
 
 1. MCP tool called with name/group/platform filters
-2. `_filter_devices()` narrows inventory to matching devices
+2. `tasks.run_nornir_task()` → `_filter_devices()` narrows inventory to matching devices
 3. NAPALM task executed via Nornir's `nr.run()`
-4. Raw NAPALM response returned as dict
+4. `_result_to_dict()` normalizes `AggregatedResult` → `dict[str, HostResult]`
 5. FastMCP automatically serializes to JSON
+
+### Type Design
+
+- `NornirLike` protocol in `runner.py` defines the structural interface (`inventory`, `filter()`, `run()`) for task helpers, enabling injection of real or fake Nornir without importing the concrete class.
+- `HostResult` model makes success/failure explicit: `ok: bool`, `data: Any | None`, `error: str | None`.
 
 ### Dependencies
 

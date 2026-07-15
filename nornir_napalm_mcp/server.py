@@ -3,138 +3,22 @@
 The FastMCP instance and CLI entry point live in ``main.py``.
 """
 
-import logging
-from collections.abc import Iterable
-from typing import TYPE_CHECKING, Any
+from __future__ import annotations
+
+from typing import Any
 
 from fastmcp import FastMCP
 from nornir_napalm.plugins.tasks import napalm_cli, napalm_get
 
-from nornir_napalm_mcp.models import GetterInfo, HostResult, InventoryDevice
+from nornir_napalm_mcp.introspection import list_getters
+from nornir_napalm_mcp.models import GetterInfo, InventoryDevice
 from nornir_napalm_mcp.runner import get_nornir, reset_nornir
-
-if TYPE_CHECKING:
-    from nornir.core import Nornir
-    from nornir.core.inventory import Host
-    from nornir.core.task import AggregatedResult  # noqa: F401 - used in type hints
-
-log = logging.getLogger("nornir-napalm-mcp")
+from nornir_napalm_mcp.tasks import run_nornir_task
 
 mcp = FastMCP(
     name="Nornir-NAPALM Server",
     instructions="Query network devices via NAPALM. Call nornir_list_inventory first.",
 )
-
-
-if TYPE_CHECKING:
-    from nornir.core.inventory import Host
-
-
-def _host_matches_name(host: "Host", names: Iterable[str]) -> bool:
-    """Filter function to match host by name."""
-    return host.name in names
-
-
-def _host_matches_group(host: "Host", group: str) -> bool:
-    """Filter function to match host by group."""
-    return group in [g.name for g in host.groups]
-
-
-def _filter_devices(
-    nr: "Nornir",
-    name: str | list[str] | None = None,
-    group: str | None = None,
-    platform: str | None = None,
-) -> "Nornir":
-    """Filters Nornir inventory by name, group, or platform.
-
-    At least one filter parameter should be provided. If no devices match
-    the given filters, a ValueError is raised with available device names.
-
-    Args:
-        nr: The Nornir instance to filter.
-        name: Device name or list of names to filter by.
-        group: Group name to filter by.
-        platform: Platform name to filter by.
-
-    Returns:
-        A filtered Nornir instance containing only matching devices.
-
-    Raises:
-        ValueError: If no devices match the provided filters.
-    """
-    if name:
-        names = {name} if isinstance(name, str) else set(name)
-        nr = nr.filter(filter_func=lambda h: _host_matches_name(h, names))
-    if group:
-        nr = nr.filter(filter_func=lambda h: _host_matches_group(h, group))
-    if platform:
-        nr = nr.filter(platform=platform)
-
-    if not nr.inventory.hosts:
-        raise ValueError(
-            "No devices match the provided filters. "
-            "Call nornir_list_inventory to see available devices."
-        )
-
-    return nr
-
-
-def _run_nornir_task(
-    task: Any,
-    name: str | list[str] | None = None,
-    group: str | None = None,
-    platform: str | None = None,
-    **task_kwargs: Any,
-) -> dict[str, HostResult]:
-    """Run a Nornir task against filtered devices and return HostResult dict.
-
-    Args:
-        task: The Nornir task function to execute (e.g., napalm_get, napalm_cli).
-        name: Device name or list of names to target.
-        group: Group name to filter devices by.
-        platform: Platform name to filter devices by.
-        **task_kwargs: Additional keyword arguments passed to the task.
-
-    Returns:
-        A dictionary mapping each device name to a HostResult.
-    """
-    nr = _filter_devices(get_nornir(), name=name, group=group, platform=platform)
-    result = nr.run(task=task, **task_kwargs)
-    return _result_to_dict(result)
-
-
-def _result_to_dict(result: "AggregatedResult") -> dict[str, HostResult]:
-    """Converts a Nornir AggregatedResult into a dict of HostResult keyed by host.
-
-    Per-host task failures are surfaced via an explicit ``ok=False`` /
-    ``error=...`` entry rather than silently returning the underlying
-    exception object as if it were normal task data.
-
-    Args:
-        result: The AggregatedResult returned by ``nr.run(...)``.
-
-    Returns:
-        A dictionary mapping each host name to a HostResult: ``ok=True``
-        with ``data`` populated on success, or ``ok=False`` with ``error``
-        populated if the task failed for that host.
-    """
-    output: dict[str, HostResult] = {}
-    for host, multi_result in result.items():
-        if not multi_result:
-            output[host] = HostResult(ok=False, error="No tasks returned for host")
-            continue
-        if multi_result.failed:
-            failure = multi_result[0].exception or multi_result[0].result
-            output[host] = HostResult(ok=False, error=str(failure))
-        else:
-            output[host] = HostResult(ok=True, data=multi_result[0].result)
-    return output
-
-
-def _host_name_key(host: "Host") -> str:
-    """Sort key function for hosts by name."""
-    return host.name
 
 
 @mcp.tool()
@@ -153,7 +37,7 @@ def nornir_list_inventory() -> list[InventoryDevice]:
             platform=str(host.platform),
             groups=[g.name for g in host.groups],
         )
-        for host in sorted(nr.inventory.hosts.values(), key=_host_name_key)
+        for host in sorted(nr.inventory.hosts.values(), key=lambda h: h.name)
     ]
 
 
@@ -175,15 +59,13 @@ def nornir_get_facts(
 
     Returns:
         A dictionary mapping each device name to a HostResult. On success,
-        ``data`` contains the facts dictionary (hostname, vendor, model,
-        os_version, serial_number). On failure, ``ok`` is False and
-        ``error`` describes what went wrong.
+        ``data`` contains the facts dictionary. On failure, ``ok`` is False
+        and ``error`` describes what went wrong.
 
     Raises:
         ValueError: If no devices match the provided filters.
     """
-
-    return _run_nornir_task(
+    return run_nornir_task(
         napalm_get, name=name, group=group, platform=platform, getters=["facts"]
     )
 
@@ -216,9 +98,8 @@ def nornir_run_getter(
     Raises:
         ValueError: If no devices match the provided filters.
     """
-
     g_opts = {getter: getter_options} if getter_options else None
-    return _run_nornir_task(
+    return run_nornir_task(
         napalm_get,
         name=name,
         group=group,
@@ -259,7 +140,6 @@ def nornir_get_config(
     Raises:
         ValueError: If no devices match the provided filters.
     """
-
     getter_options = {
         "config": {
             "retrieve": retrieve,
@@ -268,7 +148,7 @@ def nornir_get_config(
             "format": format,
         }
     }
-    return _run_nornir_task(
+    return run_nornir_task(
         napalm_get,
         name=name,
         group=group,
@@ -304,8 +184,7 @@ def nornir_run_cli(
     Raises:
         ValueError: If no devices match the provided filters.
     """
-
-    return _run_nornir_task(
+    return run_nornir_task(
         napalm_cli, name=name, group=group, platform=platform, commands=commands
     )
 
@@ -321,26 +200,7 @@ def nornir_list_getters() -> list[GetterInfo]:
         A list of GetterInfo objects, one per platform, each containing
         the platform name and a sorted list of available getter names.
     """
-    import napalm
-
-    nr = get_nornir()
-    platforms = {str(host.platform) for host in nr.inventory.hosts.values()}
-
-    results = []
-    for platform in sorted(platforms):
-        try:
-            driver = napalm.get_network_driver(platform)
-            getters = sorted(
-                name.removeprefix("get_")
-                for name in dir(driver)
-                if name.startswith("get_") and callable(getattr(driver, name))
-            )
-        except Exception as e:
-            log.warning("Could not introspect driver for platform '%s': %s", platform, e)
-            getters = []
-        results.append(GetterInfo(platform=platform, getters=getters))
-
-    return results
+    return list_getters()
 
 
 @mcp.tool()

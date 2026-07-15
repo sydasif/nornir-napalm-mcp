@@ -1,9 +1,11 @@
 """Nornir initialization for the MCP Server."""
 
+from __future__ import annotations
+
 import os
 from functools import cache
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 
 import yaml
 from nornir import InitNornir
@@ -20,6 +22,28 @@ _PATH_KEYS: frozenset[str] = frozenset(
         "log_file",
     }
 )
+
+
+@runtime_checkable
+class NornirLike(Protocol):
+    """Structural interface the task layer relies on.
+
+    Declares the minimal Nornir surface (filtered inventory access,
+    device filtering, task execution) so the task helpers accept the real
+    Nornir instance or a fake without importing the concrete class.
+    """
+
+    @property
+    def inventory(self) -> Any: ...
+
+    def filter(  # noqa: A003 - matches Nornir's API name
+        self,
+        *,
+        filter_func: Any = None,
+        platform: str | None = None,
+    ) -> NornirLike: ...
+
+    def run(self, task: Any, **task_kwargs: Any) -> Any: ...
 
 
 @cache
