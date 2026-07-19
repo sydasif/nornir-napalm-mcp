@@ -36,6 +36,8 @@ class NornirLike(Protocol):
     @property
     def inventory(self) -> Any: ...
 
+    data: Any
+
     def filter(  # noqa: A003 - matches Nornir's API name
         self,
         *,

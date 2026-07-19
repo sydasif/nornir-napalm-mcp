@@ -184,7 +184,9 @@ nornir-napalm-mcp/
 │   └── py.typed          # PEP 561 marker for downstream type checking
 ├── tests/
 │   ├── conftest.py       # Fake Nornir stubs and pytest fixtures
-│   ├── test_helpers.py   # Unit tests for all MCP tools and CLI entry point
+│   ├── test_server.py    # Unit tests for the 7 MCP tools and inventory listing
+│   ├── test_tasks.py     # Unit tests for device filtering and task execution
+│   ├── test_cli.py       # Unit tests for the CLI entry points
 │   └── test_runner.py    # Unit tests for config loading and path expansion
 ├── config.example.yaml   # Example Nornir configuration
 ├── pyproject.toml        # Build config, dependencies, and tool settings

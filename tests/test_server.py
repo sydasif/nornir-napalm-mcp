@@ -1,4 +1,4 @@
-"""Tests for server.py helpers and tool entry points.
+"""Tests for server.py MCP tool definitions.
 
 These tests run against a fake Nornir inventory injected via
 the `fake_nornir` fixture — no real devices or SSH sessions involved.
@@ -12,16 +12,19 @@ import pytest
 
 from nornir_napalm_mcp import runner, server
 from nornir_napalm_mcp.models import HostResult
-from nornir_napalm_mcp.tasks import _filter_devices
-from tests.conftest import FakeGroup, FakeHost, FakeHosts, FakeInventory, FakeNornir
 
 
 @pytest.fixture(autouse=True)
-def _reload_server(fake_nornir: dict[str, FakeHost]) -> Iterator[None]:
+def _reload_server(fake_nornir: dict[str, object]) -> Iterator[None]:
     """Reset runner's cached Nornir singleton before each test."""
     runner.reset_nornir()
     yield
     runner.reset_nornir()
+
+
+# ---------------------------------------------------------------------------
+# nornir_list_inventory
+# ---------------------------------------------------------------------------
 
 
 def test_list_inventory_shape() -> None:
@@ -39,6 +42,25 @@ def test_list_inventory_sorted() -> None:
     devices = server.nornir_list_inventory()
     names = [d.name for d in devices]
     assert names == sorted(names)
+
+
+def test_list_inventory_empty(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify list_inventory returns empty list when inventory is empty."""
+
+    def mock_init(**_: object) -> object:
+        from tests.conftest import FakeHosts, FakeInventory, FakeNornir
+
+        return FakeNornir(FakeInventory(FakeHosts({})))
+
+    monkeypatch.setattr("nornir_napalm_mcp.runner.InitNornir", mock_init)
+    runner.reset_nornir()
+    devices = server.nornir_list_inventory()
+    assert devices == []
+
+
+# ---------------------------------------------------------------------------
+# nornir_get_facts
+# ---------------------------------------------------------------------------
 
 
 def test_get_facts_returns_dict() -> None:
@@ -70,6 +92,11 @@ def test_get_facts_no_match_raises() -> None:
         server.nornir_get_facts(name="nonexistent")
 
 
+# ---------------------------------------------------------------------------
+# nornir_run_getter
+# ---------------------------------------------------------------------------
+
+
 def test_run_getter_returns_payload() -> None:
     """Verify nornir_run_getter returns the expected payload wrapped in getter key."""
     out = server.nornir_run_getter(getter="arp_table", name="spine-01")
@@ -99,6 +126,11 @@ def test_run_getter_batch() -> None:
     assert set(result.keys()) == {"spine-01", "leaf-01"}
 
 
+# ---------------------------------------------------------------------------
+# nornir_get_config
+# ---------------------------------------------------------------------------
+
+
 def test_get_config_returns_config() -> None:
     """Verify nornir_get_config returns config data wrapped in getter key."""
     cfg = server.nornir_get_config(name="spine-01")
@@ -113,6 +145,11 @@ def test_get_config_running_only() -> None:
     """Verify nornir_get_config with retrieve='running'."""
     cfg = server.nornir_get_config(name="spine-01", retrieve="running")
     assert cfg["spine-01"].data["config"]["running"] is not None
+
+
+# ---------------------------------------------------------------------------
+# nornir_run_cli
+# ---------------------------------------------------------------------------
 
 
 def test_run_cli_returns_output() -> None:
@@ -135,6 +172,11 @@ def test_run_cli_batch() -> None:
     result = server.nornir_run_cli(commands=["show version"], name=["spine-01", "leaf-01"])
     assert isinstance(result, dict)
     assert set(result.keys()) == {"spine-01", "leaf-01"}
+
+
+# ---------------------------------------------------------------------------
+# nornir_list_getters
+# ---------------------------------------------------------------------------
 
 
 def test_list_getters_returns_platforms() -> None:
@@ -163,6 +205,8 @@ def test_list_getters_sorted_by_platform() -> None:
 
 def test_list_getters_unknown_platform_returns_empty(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify list_getters returns empty getters for unknown platform."""
+    from tests.conftest import FakeHost, FakeHosts, FakeInventory, FakeNornir
+
     hosts_data = {
         "bogus": FakeHost(name="bogus", hostname="10.0.0.1", platform="nonexistent_os", groups=[]),
     }
@@ -178,6 +222,11 @@ def test_list_getters_unknown_platform_returns_empty(monkeypatch: pytest.MonkeyP
     assert results[0].getters == []
 
 
+# ---------------------------------------------------------------------------
+# nornir_reload_inventory
+# ---------------------------------------------------------------------------
+
+
 def test_reload_inventory() -> None:
     """Verify inventory reload clears the cache."""
     runner.get_nornir()
@@ -185,139 +234,3 @@ def test_reload_inventory() -> None:
     # After reload, calling get_nornir() should create a new instance
     nr = runner.get_nornir()
     assert nr is not None
-
-
-def test_filter_devices_empty_raises() -> None:
-    """Verify _filter_devices raises ValueError when no devices match."""
-    nr = FakeNornir(FakeInventory(FakeHosts({})))
-    with pytest.raises(ValueError, match="No devices match the provided filters"):
-        _filter_devices(nr, name="nonexistent")
-
-
-def test_filter_devices_by_name_list() -> None:
-    """Verify _filter_devices filters by list of names."""
-    hosts = {
-        "a": FakeHost(name="a", hostname="10.0.0.1", platform="eos", groups=[]),
-        "b": FakeHost(name="b", hostname="10.0.0.2", platform="eos", groups=[]),
-    }
-    nr = FakeNornir(FakeInventory(FakeHosts(hosts)))
-    filtered = _filter_devices(nr, name=["a"])
-    assert set(filtered.inventory.hosts._hosts.keys()) == {"a"}
-
-
-def test_filter_devices_by_group() -> None:
-    """Verify _filter_devices filters by group."""
-    hosts = {
-        "r1": FakeHost(
-            name="r1",
-            hostname="10.0.0.1",
-            platform="eos",
-            groups=[FakeGroup(name="core")],
-        ),
-        "r2": FakeHost(
-            name="r2",
-            hostname="10.0.0.2",
-            platform="eos",
-            groups=[FakeGroup(name="edge")],
-        ),
-    }
-    nr = FakeNornir(FakeInventory(FakeHosts(hosts)))
-    filtered = _filter_devices(nr, group="core")
-    assert set(filtered.inventory.hosts._hosts.keys()) == {"r1"}
-
-
-def test_filter_devices_by_platform() -> None:
-    """Verify _filter_devices filters by platform."""
-    hosts = {
-        "r1": FakeHost(name="r1", hostname="10.0.0.1", platform="eos", groups=[]),
-        "r2": FakeHost(name="r2", hostname="10.0.0.2", platform="ios", groups=[]),
-    }
-    nr = FakeNornir(FakeInventory(FakeHosts(hosts)))
-    filtered = _filter_devices(nr, platform="eos")
-    assert set(filtered.inventory.hosts._hosts.keys()) == {"r1"}
-
-
-def test_list_inventory_empty(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify list_inventory returns empty list when inventory is empty."""
-
-    def mock_init(**_: object) -> FakeNornir:
-        return FakeNornir(FakeInventory(FakeHosts({})))
-
-    monkeypatch.setattr("nornir_napalm_mcp.runner.InitNornir", mock_init)
-    runner.reset_nornir()
-    devices = server.nornir_list_inventory()
-    assert devices == []
-
-
-# ---------------------------------------------------------------------------
-# Smoke tests for CLI entry points
-# ---------------------------------------------------------------------------
-
-
-def test_main_help(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify main() accepts --help without crashing."""
-    from nornir_napalm_mcp.main import main
-
-    monkeypatch.setattr("sys.argv", ["nornir-napalm-mcp", "--help"])
-    with pytest.raises(SystemExit, match="0"):
-        main()
-
-
-def test_main_stdio_transport(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify main() with --transport stdio parses args correctly."""
-    from nornir_napalm_mcp.main import main
-    from nornir_napalm_mcp.server import mcp
-
-    calls: list[tuple[str, dict[str, object]]] = []
-
-    def mock_run(**kwargs: object) -> None:
-        calls.append(("run", kwargs))
-
-    monkeypatch.setattr("sys.argv", ["nornir-napalm-mcp", "--transport", "stdio"])
-    monkeypatch.setattr(mcp, "run", mock_run)
-    main()
-    assert len(calls) == 1
-    assert calls[0][0] == "run"
-    assert calls[0][1]["transport"] == "stdio"
-
-
-def test_main_http_transport(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify main() with --transport http passes host and port."""
-    from nornir_napalm_mcp.main import main
-    from nornir_napalm_mcp.server import mcp
-
-    calls: list[tuple[str, dict[str, object]]] = []
-
-    def mock_run(**kwargs: object) -> None:
-        calls.append(("run", kwargs))
-
-    monkeypatch.setattr(
-        "sys.argv",
-        ["nornir-napalm-mcp", "--transport", "http", "--host", "0.0.0.0", "--port", "9000"],
-    )
-    monkeypatch.setattr(mcp, "run", mock_run)
-    main()
-    assert len(calls) == 1
-    assert calls[0][1]["transport"] == "http"
-    assert calls[0][1]["host"] == "0.0.0.0"
-    assert calls[0][1]["port"] == 9000
-
-
-def test_main_module_delegates_to_main(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Verify __main__.py calls main() at import time."""
-    import importlib
-    import sys
-
-    called: list[bool] = []
-    import nornir_napalm_mcp.main as main_module
-
-    monkeypatch.setattr(main_module, "main", lambda: called.append(True))
-
-    # Force reimport so __main__ executes its module-level main() call
-    mod_name = "nornir_napalm_mcp.__main__"
-    sys.modules.pop(mod_name, None)
-    importlib.import_module(mod_name)
-
-    assert called == [True]
