@@ -14,9 +14,9 @@ from collections.abc import Iterator
 
 import pytest
 
-from nornir_mcp import runner
-from nornir_mcp.runner import EXECUTION_LOCK, execution_lock
-from nornir_mcp.tasks import run_nornir_task
+from nornir_mcp.core import runner
+from nornir_mcp.core.runner import EXECUTION_LOCK, execution_lock
+from nornir_mcp.core.tasks import run_nornir_task
 from tests.conftest import FakeTaskResult, fake_netmiko_send_command
 
 

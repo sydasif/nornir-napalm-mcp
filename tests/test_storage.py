@@ -11,9 +11,8 @@ from pathlib import Path
 
 import pytest
 
-from nornir_mcp import storage
-from nornir_mcp.errors import ValidationError
-from nornir_mcp.storage import FilesystemBackupStore
+from nornir_mcp.core.errors import ValidationError
+from nornir_mcp.core.storage import FilesystemBackupStore
 
 CONTENT = "hostname spine-01\ninterface Ethernet1\n"
 
@@ -85,7 +84,7 @@ def test_backups_are_immutable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
     """An existing backup file is never overwritten — the save is refused."""
     store = _store(tmp_path)
     frozen = datetime(2026, 1, 2, 3, 4, 5, 123456, tzinfo=UTC)
-    monkeypatch.setattr(storage, "_now_utc", lambda: frozen)
+    monkeypatch.setattr("nornir_mcp.core.storage._now_utc", lambda: frozen)
 
     first = store.save("spine-01", CONTENT, trigger="standalone")
     with pytest.raises(ValidationError, match="immutable"):
@@ -100,7 +99,9 @@ def test_same_second_saves_do_not_collide(tmp_path: Path, monkeypatch: pytest.Mo
     store = _store(tmp_path)
     base = datetime(2026, 1, 2, 3, 4, 5, tzinfo=UTC)
     micros = iter([100000, 200000])
-    monkeypatch.setattr(storage, "_now_utc", lambda: base.replace(microsecond=next(micros)))
+    monkeypatch.setattr(
+        "nornir_mcp.core.storage._now_utc", lambda: base.replace(microsecond=next(micros))
+    )
 
     a = store.save("spine-01", CONTENT, trigger="standalone")
     b = store.save("spine-01", "other config", trigger="standalone")

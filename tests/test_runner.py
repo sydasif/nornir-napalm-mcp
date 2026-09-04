@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from nornir_mcp import runner
+from nornir_mcp.core import runner
 
 
 class TestExpandConfig:

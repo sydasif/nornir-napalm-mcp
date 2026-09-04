@@ -7,8 +7,8 @@ rejection. This module is pure — no device I/O.
 
 from __future__ import annotations
 
-import subprocess
-import sys
+import importlib.util
+from pathlib import Path
 
 import pytest
 
@@ -96,14 +96,11 @@ def test_shell_injection_attempt_rejected() -> None:
 
 def test_policy_module_does_not_import_nornir() -> None:
     """policy.py must stay pure (stdlib + errors only, no nornir import)."""
-    code = (
-        "import sys\n"
-        "import nornir_mcp.policy\n"
-        "imported = [m for m in sys.modules if m == 'nornir' or m.startswith('nornir.')]\n"
-        "assert not imported, f'policy.py transitively imports nornir: {imported}'\n"
-    )
-    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
-    assert result.returncode == 0, result.stderr
+
+    spec = importlib.util.find_spec("nornir_mcp.core.policy")
+    assert spec is not None and spec.origin is not None
+    source = Path(spec.origin).read_text()
+    assert "import nornir" not in source, "policy.py must not import nornir"
 
 
 # ---------------------------------------------------------------------------

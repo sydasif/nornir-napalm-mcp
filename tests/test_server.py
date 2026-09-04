@@ -18,9 +18,10 @@ from typing import Any
 import pytest
 from fastmcp.exceptions import ValidationError
 
-from nornir_mcp import audit, runner, server, storage
-from nornir_mcp.errors import BackupError, DeviceConnectionError
-from nornir_mcp.responses import HostOutcome, ToolEnvelope
+from nornir_mcp import server
+from nornir_mcp.core import audit, runner, storage
+from nornir_mcp.core.envelope import HostOutcome, ToolEnvelope
+from nornir_mcp.core.errors import BackupError, DeviceConnectionError
 from tests.conftest import (
     FakeHost,
     FakeHosts,
@@ -178,7 +179,7 @@ def test_list_inventory_empty(monkeypatch: pytest.MonkeyPatch) -> None:
     def mock_init(**_: object) -> FakeNornir:
         return FakeNornir(FakeInventory(FakeHosts({})))
 
-    monkeypatch.setattr("nornir_mcp.runner.InitNornir", mock_init)
+    monkeypatch.setattr("nornir_mcp.core.runner.InitNornir", mock_init)
     runner.reset_nornir()
     env = server.nornir_list_inventory(_ctx())
     assert env.results["server"].data == []
@@ -416,7 +417,7 @@ def test_list_getters_unknown_platform_returns_empty(monkeypatch: pytest.MonkeyP
     def mock_init(**_: object) -> FakeNornir:
         return FakeNornir(FakeInventory(FakeHosts(hosts_data)))
 
-    monkeypatch.setattr("nornir_mcp.runner.InitNornir", mock_init)
+    monkeypatch.setattr("nornir_mcp.core.runner.InitNornir", mock_init)
     runner.reset_nornir()
     data = server.nornir_list_getters(_ctx()).results["server"].data
     assert data is not None
@@ -454,7 +455,7 @@ def _patch_hosts(monkeypatch: pytest.MonkeyPatch, hosts_data: dict[str, FakeHost
     def mock_init(**_: object) -> FakeNornir:
         return FakeNornir(FakeInventory(FakeHosts(hosts_data)))
 
-    monkeypatch.setattr("nornir_mcp.runner.InitNornir", mock_init)
+    monkeypatch.setattr("nornir_mcp.core.runner.InitNornir", mock_init)
     runner.reset_nornir()
 
 
@@ -714,7 +715,7 @@ def test_backup_config_partial_failure_preserves_successes(
     def mock_init(**_: object) -> FakeNornir:
         return FakeNornir(FakeInventory(FakeHosts(hosts)))
 
-    monkeypatch.setattr("nornir_mcp.runner.InitNornir", mock_init)
+    monkeypatch.setattr("nornir_mcp.core.runner.InitNornir", mock_init)
     runner.reset_nornir()
 
     # Force the netmiko fallback and make it fail only for mx-01.

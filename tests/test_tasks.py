@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import pytest
 
+from nornir_mcp.core.tasks import _filter_devices, _results_to_outcomes
 from nornir_mcp.errors import ValidationError
 from nornir_mcp.responses import HostOutcome
-from nornir_mcp.tasks import _filter_devices, _results_to_outcomes
 from tests.conftest import (
     FakeGroup,
     FakeHost,

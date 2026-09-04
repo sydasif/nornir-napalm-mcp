@@ -25,7 +25,8 @@ from typing import Any
 import pytest
 from fastmcp import Client
 
-from nornir_mcp import audit, runner, server, storage
+from nornir_mcp import server
+from nornir_mcp.core import audit, runner, storage
 from tests.test_server import FROZEN_TOOL_NAMES
 
 

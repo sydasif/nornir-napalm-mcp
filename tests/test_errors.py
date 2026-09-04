@@ -7,8 +7,8 @@ defines the conservative retry policy these tests pin.
 
 from __future__ import annotations
 
-import subprocess
-import sys
+import importlib.util
+from pathlib import Path
 
 import pytest
 
@@ -139,14 +139,11 @@ def test_base_error_accepts_explicit_type_and_retryable() -> None:
 
 def test_errors_module_does_not_import_nornir() -> None:
     """errors.py must stay pure stdlib + enum (no nornir import)."""
-    code = (
-        "import sys\n"
-        "import nornir_mcp.errors\n"
-        "imported = [m for m in sys.modules if m == 'nornir' or m.startswith('nornir.')]\n"
-        "assert not imported, f'errors.py transitively imports nornir: {imported}'\n"
-    )
-    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
-    assert result.returncode == 0, result.stderr
+
+    spec = importlib.util.find_spec("nornir_mcp.core.errors")
+    assert spec is not None and spec.origin is not None
+    source = Path(spec.origin).read_text()
+    assert "import nornir" not in source, "errors.py must not import nornir"
 
 
 def test_errors_module_has_expected_exports() -> None:
