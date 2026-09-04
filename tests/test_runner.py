@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from nornir_napalm_mcp import runner
+from nornir_mcp import runner
 
 
 class TestExpandConfig:
@@ -39,29 +39,19 @@ class TestExpandConfig:
 
     def test_dict_path_key_resolves_relative(self, tmp_path: Path) -> None:
         """Known path keys (host_file etc.) resolve relative to config dir."""
-        result = runner._expand_config(
-            {"host_file": "inventory/hosts.yaml"}, tmp_path
-        )
-        assert result["host_file"] == str(
-            (tmp_path / "inventory" / "hosts.yaml").resolve()
-        )
+        result = runner._expand_config({"host_file": "inventory/hosts.yaml"}, tmp_path)
+        assert result["host_file"] == str((tmp_path / "inventory" / "hosts.yaml").resolve())
 
     def test_dict_path_key_absolute_passthrough(self, tmp_path: Path) -> None:
         """Absolute paths in known path keys are not modified."""
-        result = runner._expand_config(
-            {"host_file": "/etc/hosts.yaml"}, tmp_path
-        )
+        result = runner._expand_config({"host_file": "/etc/hosts.yaml"}, tmp_path)
         assert result["host_file"] == "/etc/hosts.yaml"
 
     def test_dict_path_key_expands_env_then_resolves(self, tmp_path: Path) -> None:
         """Known path keys expand $VAR then resolve relative to config dir."""
         os.environ["TEST_HOST_DIR"] = "my_hosts"
-        result = runner._expand_config(
-            {"host_file": "$TEST_HOST_DIR/hosts.yaml"}, tmp_path
-        )
-        assert result["host_file"] == str(
-            (tmp_path / "my_hosts" / "hosts.yaml").resolve()
-        )
+        result = runner._expand_config({"host_file": "$TEST_HOST_DIR/hosts.yaml"}, tmp_path)
+        assert result["host_file"] == str((tmp_path / "my_hosts" / "hosts.yaml").resolve())
         del os.environ["TEST_HOST_DIR"]
 
     def test_dict_unknown_key_no_resolve(self, tmp_path: Path) -> None:

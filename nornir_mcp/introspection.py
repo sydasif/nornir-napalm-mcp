@@ -6,8 +6,8 @@ import logging
 
 import napalm
 
-from nornir_napalm_mcp.models import GetterInfo
-from nornir_napalm_mcp.runner import get_nornir
+from nornir_mcp.models import GetterInfo
+from nornir_mcp.runner import get_nornir
 
 log = logging.getLogger("nornir-napalm-mcp")
 

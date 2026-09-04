@@ -12,10 +12,10 @@ from nornir_napalm.plugins.tasks import (
     napalm_get,
 )
 
-from nornir_napalm_mcp.introspection import list_getters
-from nornir_napalm_mcp.models import GetterInfo, InventoryDevice
-from nornir_napalm_mcp.runner import get_nornir, reset_nornir
-from nornir_napalm_mcp.tasks import run_nornir_task
+from nornir_mcp.introspection import list_getters
+from nornir_mcp.models import GetterInfo, InventoryDevice
+from nornir_mcp.runner import get_nornir, reset_nornir
+from nornir_mcp.tasks import run_nornir_task
 
 mcp = FastMCP(
     name="Nornir-NAPALM Server",

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from nornir_napalm_mcp.models import HostResult
-from nornir_napalm_mcp.tasks import _filter_devices, _result_to_dict
+from nornir_mcp.models import HostResult
+from nornir_mcp.tasks import _filter_devices, _result_to_dict
 from tests.conftest import (
     FakeGroup,
     FakeHost,

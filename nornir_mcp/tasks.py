@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from nornir_napalm_mcp.models import HostResult
-from nornir_napalm_mcp.runner import NornirLike, get_nornir
+from nornir_mcp.models import HostResult
+from nornir_mcp.runner import NornirLike, get_nornir
 
 if TYPE_CHECKING:
     from nornir.core.task import AggregatedResult

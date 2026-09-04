@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from nornir_napalm_mcp.server import mcp
+from nornir_mcp.server import mcp
 
 
 def main(argv: list[str] | None = None) -> None:

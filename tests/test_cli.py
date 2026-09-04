@@ -7,7 +7,7 @@ import pytest
 
 def test_main_help(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify main() accepts --help without crashing."""
-    from nornir_napalm_mcp.main import main
+    from nornir_mcp.main import main
 
     monkeypatch.setattr("sys.argv", ["nornir-napalm-mcp", "--help"])
     with pytest.raises(SystemExit, match="0"):
@@ -16,8 +16,8 @@ def test_main_help(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_main_stdio_transport(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify main() with --transport stdio parses args correctly."""
-    from nornir_napalm_mcp.main import main
-    from nornir_napalm_mcp.server import mcp
+    from nornir_mcp.main import main
+    from nornir_mcp.server import mcp
 
     calls: list[tuple[str, dict[str, object]]] = []
 
@@ -34,8 +34,8 @@ def test_main_stdio_transport(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_main_http_transport(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify main() with --transport http passes host and port."""
-    from nornir_napalm_mcp.main import main
-    from nornir_napalm_mcp.server import mcp
+    from nornir_mcp.main import main
+    from nornir_mcp.server import mcp
 
     calls: list[tuple[str, dict[str, object]]] = []
 
@@ -56,8 +56,8 @@ def test_main_http_transport(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_main_argv_param_directly(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify main() honors an explicit argv without reading sys.argv."""
-    from nornir_napalm_mcp.main import main
-    from nornir_napalm_mcp.server import mcp
+    from nornir_mcp.main import main
+    from nornir_mcp.server import mcp
 
     calls: list[tuple[str, dict[str, object]]] = []
 
@@ -80,7 +80,7 @@ def test_main_module_delegates_to_main(
     import sys
 
     called: list[bool] = []
-    import nornir_napalm_mcp.main as main_module
+    import nornir_mcp.main as main_module
 
     monkeypatch.setattr(main_module, "main", lambda: called.append(True))
 

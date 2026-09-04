@@ -10,8 +10,8 @@ from collections.abc import Iterator
 
 import pytest
 
-from nornir_napalm_mcp import runner, server
-from nornir_napalm_mcp.models import HostResult
+from nornir_mcp import runner, server
+from nornir_mcp.models import HostResult
 
 
 @pytest.fixture(autouse=True)

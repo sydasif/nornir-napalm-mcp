@@ -3,9 +3,9 @@ requires = ["hatchling>=1.22"]
 build-backend = "hatchling.build"
 
 [project]
-name = "nornir-napalm-mcp"
+name = "nornir-mcp"
 dynamic = ["version"]
-description = "FastMCP server exposing network device data via Nornir + NAPALM"
+description = "FastMCP server exposing network device data via Nornir"
 readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
@@ -20,13 +20,13 @@ dependencies = [
 ]
 
 [project.scripts]
-nornir-napalm-mcp = "nornir_napalm_mcp.main:main"
+nornir-mcp = "nornir_mcp.main:main"
 
 [tool.hatch.version]
-path = "nornir_napalm_mcp/__init__.py"
+path = "nornir_mcp/__init__.py"
 
 [tool.hatch.build.targets.wheel]
-packages = ["nornir_napalm_mcp"]
+packages = ["nornir_mcp"]
 
 # ---------------------------------------------------------------------------
 # Ruff linting
@@ -51,9 +51,7 @@ ignore_missing_imports = true
 # ---------------------------------------------------------------------------
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-filterwarnings = [
-    "once::DeprecationWarning",
-]
+filterwarnings = ["once::DeprecationWarning"]
 
 [dependency-groups]
 dev = [
