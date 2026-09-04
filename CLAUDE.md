@@ -1,0 +1,104 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Development Commands
+
+### Core Workflows
+
+**Test Execution**
+
+- Run all tests: `uv run pytest`
+- Run with coverage: `uv run pytest --cov=nornir_napalm_mcp --cov-branch`
+- Run specific test: `uv run pytest tests/test_server.py::test_get_facts_returns_dict`
+
+**Code Quality**
+
+- Lint: `uv run ruff check .`
+- Fix lint issues: `uv run ruff check --fix .`
+- Type check: `uv run mypy .`
+- Format: `uv run ruff format .`
+- Dead code scan: `uv run vulture nornir_napalm_mcp tests --min-confidence 80`
+  - Note: side-effect pytest fixtures (e.g. `fake_nornir` requested only to trigger a monkeypatch) are flagged as false positives; pull them in via `request.getfixturevalue(...)` or class-level `@pytest.mark.usefixtures(...)` instead of unused fixture params
+
+**Dependency Management**
+
+- Sync dependencies: `uv sync`
+- Add dependency: `uv add <package>`
+- Add dev dependency: `uv add --dev <package>`
+- Update lockfile: `uv lock`
+
+**Development Server**
+
+- Local dev (MCP Inspector): `fastmcp dev nornir_napalm_mcp/server.py`
+- Claude Desktop install: `fastmcp install nornir_napalm_mcp/server.py`
+- Run STDIO transport: `nornir-napalm-mcp --transport stdio`
+- Run HTTP transport: `nornir-napalm-mcp --transport http --host 0.0.0.0 --port 8000`
+
+## Code Architecture
+
+### Core Components
+
+**nornir_napalm_mcp/** - Installable package:
+
+- `__init__.py` - Package version (`__version__`)
+- `__main__.py` - Supports `python -m nornir_napalm_mcp`
+- `models.py` - Pydantic data models (`InventoryDevice`, `GetterInfo`, `HostResult`)
+- `runner.py` - Nornir initialization, config loading, caching (`get_nornir()`, `reset_nornir()`); exports `NornirLike` protocol
+- `tasks.py` - Task helpers: `_filter_devices()`, `run_nornir_task()`, `_result_to_dict()`
+- `introspection.py` - NAPALM getter discovery per platform (`list_getters()`)
+- `server.py` - FastMCP server instance and the 6 `@mcp.tool()` definitions
+- `py.typed` - PEP 561 marker for downstream type checking
+
+**Testing Approach** (`tests/` directory):
+
+- `conftest.py` - Pytest fixtures that stub Nornir for isolated testing
+- `test_server.py` - Unit tests for the 6 MCP tools and inventory listing
+- `test_tasks.py` - Unit tests for device filtering and task execution
+- `test_cli.py` - Unit tests for the CLI entry points
+- `test_runner.py` - Unit tests for config loading and path expansion
+- Tests use monkeypatching to replace `InitNornir` with fake inventory
+- Test data includes spine-01 and leaf-01 devices for consistent assertions
+- **`FakeNornir` must model the `GlobalState.data` surface** — since `tasks.run_nornir_task()` calls `nr.data.reset_failed_hosts()`, `FakeNornir` carries a `data: FakeGlobalState` attribute (with a `reset_failed_hosts()` method). When touching `run_nornir_task`, keep `FakeGlobalState` in sync with what production code invokes on `nr.data`.
+- **Gotcha**: `nr.filter(name__in=[...])` silently returns empty in Nornir 3.5.0. Use `nr.filter(filter_func=lambda h: h.name in [...])` instead. The `FakeNornir` in `conftest.py` supports both, but real Nornir only handles `filter_func` correctly for hostname matching. Always verify filter changes against a real Nornir instance.
+
+### Key Design Patterns
+
+1. **Lazy Initialization**: Nornir instance is created only when first needed (`get_nornir()`), allowing server to start even with broken inventory
+2. **Singleton Caching**: Module-level `@cache` on `get_nornir()` ensures a single Nornir instance reused across requests, avoiding repeated YAML parsing and connection setup
+3. **Failed-device Reset**: `nr.data.reset_failed_hosts()` is called before every task. Nornir quarantines hosts that fail in `GlobalState.failed_hosts` (in `nornir/core/__init__.py:151`). In a long-lived singleton server this persists across calls; the reset makes every request start with all devices available, matching the behavior of a one-shot script (`InitNornir()` fresh per invocation)
+4. **Device Filtering**: `_filter_devices()` provides consistent name/group/platform filtering across all tools
+5. **Configuration Override**: `NORNIR_CONFIG` environment variable allows custom config paths
+6. **Transport Flexibility**: Supports both STDIO (Claude Desktop) and HTTP (network) transports
+7. **Installable Package**: Proper Python package structure for `uvx` execution from GitHub
+
+### Data Flow
+
+1. MCP tool called with name/group/platform filters
+2. `tasks.run_nornir_task()` resets `failed_hosts` via `nr.data.reset_failed_hosts()`
+3. `tasks._filter_devices()` narrows inventory to matching devices
+4. NAPALM task executed via Nornir's `nr.run()`
+5. `_result_to_dict()` normalizes `AggregatedResult` → `dict[str, HostResult]`
+6. FastMCP automatically serializes to JSON
+
+### Type Design
+
+- `NornirLike` protocol in `runner.py` defines the structural interface (`inventory`, `filter()`, `run()`) for task helpers, enabling injection of real or fake Nornir without importing the concrete class.
+- `HostResult` model makes success/failure explicit: `ok: bool`, `data: Any | None`, `error: str | None`.
+
+### Dependencies
+
+- Core: fastmcp, nornir, nornir-napalm, napalm, pydantic, paramiko
+- Testing: pytest, pytest-cov
+- Linting: ruff
+- Typing: mypy
+- Dead code: vulture
+
+## Companion Projects
+
+- **netlab-demo** (`~/Documents/netlab-demo`): Containerlab test lab with real Cisco CSR1000v + Arista cEOS devices. Deploy with `containerlab deploy -t lab.clab.yaml`. Its `.mcp.json` registers this server with `NORNIR_CONFIG` pointing to the lab's inventory. Use it for integration testing against live devices.
+
+## Error Handling Conventions
+
+- ValueError: Invalid input (unknown device, no matching filters)
+- All errors include actionable messages suggesting next steps (e.g., call list_inventory first)

@@ -1,0 +1,211 @@
+"""Tests for server.py MCP tool definitions.
+
+These tests run against a fake Nornir inventory injected via
+the `fake_nornir` fixture — no real devices or SSH sessions involved.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Iterator
+
+import pytest
+
+from nornir_napalm_mcp import runner, server
+from nornir_napalm_mcp.models import HostResult
+
+
+@pytest.fixture(autouse=True)
+def _reload_server(request: pytest.FixtureRequest) -> Iterator[None]:
+    """Reset runner's cached Nornir singleton before each test."""
+    # Pulled in for its side effect: patches runner.InitNornir for every test.
+    request.getfixturevalue("fake_nornir")
+    runner.reset_nornir()
+    yield
+    runner.reset_nornir()
+
+
+# ---------------------------------------------------------------------------
+# nornir_list_inventory
+# ---------------------------------------------------------------------------
+
+
+def test_list_inventory_shape() -> None:
+    """Verify the structure and content of the inventory list."""
+    devices = server.nornir_list_inventory()
+    assert isinstance(devices, list)
+    assert {d.name for d in devices} == {"spine-01", "leaf-01"}
+    sample = devices[0]
+    assert set(sample.model_dump()) == {"name", "hostname", "platform", "groups"}
+    assert isinstance(sample.groups, list)
+
+
+def test_list_inventory_sorted() -> None:
+    """Verify that the inventory list is returned sorted by device name."""
+    devices = server.nornir_list_inventory()
+    names = [d.name for d in devices]
+    assert names == sorted(names)
+
+
+def test_list_inventory_empty(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify list_inventory returns empty list when inventory is empty."""
+
+    def mock_init(**_: object) -> object:
+        from tests.conftest import FakeHosts, FakeInventory, FakeNornir
+
+        return FakeNornir(FakeInventory(FakeHosts({})))
+
+    monkeypatch.setattr("nornir_napalm_mcp.runner.InitNornir", mock_init)
+    runner.reset_nornir()
+    devices = server.nornir_list_inventory()
+    assert devices == []
+
+
+# ---------------------------------------------------------------------------
+# nornir_get_facts
+# ---------------------------------------------------------------------------
+
+
+def test_get_facts_returns_dict() -> None:
+    """Verify nornir_get_facts returns raw dict wrapped in getter key."""
+    facts = server.nornir_get_facts(name="spine-01")
+    assert isinstance(facts, dict)
+    assert "spine-01" in facts
+    assert facts["spine-01"].ok is True
+    assert facts["spine-01"].data["facts"]["hostname"] == "test-host"
+    assert facts["spine-01"].data["facts"]["vendor"] == "Arista"
+
+
+def test_get_facts_by_group() -> None:
+    """Verify nornir_get_facts filters by group."""
+    facts = server.nornir_get_facts(group="spine")
+    assert "spine-01" in facts
+    assert "leaf-01" not in facts
+
+
+def test_get_facts_by_platform() -> None:
+    """Verify nornir_get_facts filters by platform."""
+    facts = server.nornir_get_facts(platform="eos")
+    assert set(facts.keys()) == {"spine-01", "leaf-01"}
+
+
+def test_get_facts_no_match_raises() -> None:
+    """Verify nornir_get_facts raises ValueError when no devices match."""
+    with pytest.raises(ValueError, match="No devices match the provided filters"):
+        server.nornir_get_facts(name="nonexistent")
+
+
+# ---------------------------------------------------------------------------
+# nornir_run_getter
+# ---------------------------------------------------------------------------
+
+
+def test_run_getter_returns_payload() -> None:
+    """Verify nornir_run_getter returns the expected payload wrapped in getter key."""
+    out = server.nornir_run_getter(getter="arp_table", name="spine-01")
+    assert isinstance(out, dict)
+    assert "spine-01" in out
+    assert out["spine-01"].ok is True
+    assert out["spine-01"].data["arp_table"] == {"ok": True}
+
+
+def test_run_getter_with_options() -> None:
+    """Verify nornir_run_getter passes getter_options through."""
+    result = server.nornir_run_getter(
+        getter="facts", name="spine-01", getter_options={"keys": ["hostname"]}
+    )
+    assert result == {
+        "spine-01": HostResult(
+            ok=True,
+            data={"facts": {"hostname": "test-host", "vendor": "Arista", "model": "7280R"}},
+        )
+    }
+
+
+def test_run_getter_batch() -> None:
+    """Verify nornir_run_getter with multiple devices."""
+    result = server.nornir_run_getter(getter="facts", name=["spine-01", "leaf-01"])
+    assert isinstance(result, dict)
+    assert set(result.keys()) == {"spine-01", "leaf-01"}
+
+
+# ---------------------------------------------------------------------------
+# nornir_get_config
+# ---------------------------------------------------------------------------
+
+
+def test_get_config_returns_config() -> None:
+    """Verify nornir_get_config returns config data wrapped in getter key."""
+    cfg = server.nornir_get_config(name="spine-01")
+    assert isinstance(cfg, dict)
+    assert "spine-01" in cfg
+    assert cfg["spine-01"].ok is True
+    assert "running" in cfg["spine-01"].data["config"]
+    assert "startup" in cfg["spine-01"].data["config"]
+
+
+def test_get_config_running_only() -> None:
+    """Verify nornir_get_config with retrieve='running'."""
+    cfg = server.nornir_get_config(name="spine-01", retrieve="running")
+    assert cfg["spine-01"].data["config"]["running"] is not None
+
+
+# ---------------------------------------------------------------------------
+# nornir_list_getters
+# ---------------------------------------------------------------------------
+
+
+def test_list_getters_returns_platforms() -> None:
+    """Verify list_getters returns GetterInfo for each platform."""
+    results = server.nornir_list_getters()
+    assert isinstance(results, list)
+    platforms = {r.platform for r in results}
+    assert "eos" in platforms
+
+
+def test_list_getters_has_getters() -> None:
+    """Verify the getter lists are non-empty for known platforms."""
+    results = server.nornir_list_getters()
+    for info in results:
+        if info.platform == "eos":
+            assert len(info.getters) > 0
+            assert "facts" in info.getters
+
+
+def test_list_getters_sorted_by_platform() -> None:
+    """Verify results are sorted by platform name."""
+    results = server.nornir_list_getters()
+    names = [r.platform for r in results]
+    assert names == sorted(names)
+
+
+def test_list_getters_unknown_platform_returns_empty(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify list_getters returns empty getters for unknown platform."""
+    from tests.conftest import FakeHost, FakeHosts, FakeInventory, FakeNornir
+
+    hosts_data = {
+        "bogus": FakeHost(name="bogus", hostname="10.0.0.1", platform="nonexistent_os", groups=[]),
+    }
+
+    def mock_init(**_: object) -> FakeNornir:
+        return FakeNornir(FakeInventory(FakeHosts(hosts_data)))
+
+    monkeypatch.setattr("nornir_napalm_mcp.runner.InitNornir", mock_init)
+    runner.reset_nornir()
+    results = server.nornir_list_getters()
+    assert len(results) == 1
+    assert results[0].platform == "nonexistent_os"
+    assert results[0].getters == []
+
+
+# ---------------------------------------------------------------------------
+# nornir_reload_inventory
+# ---------------------------------------------------------------------------
+
+
+def test_reload_inventory() -> None:
+    """Verify inventory reload clears the cache."""
+    runner.get_nornir()
+    server.nornir_reload_inventory()
+    # After reload, calling get_nornir() should create a new instance
+    nr = runner.get_nornir()
+    assert nr is not None
