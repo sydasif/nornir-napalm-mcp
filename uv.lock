@@ -1562,12 +1562,14 @@ dependencies = [
     { name = "napalm" },
     { name = "nornir" },
     { name = "nornir-napalm" },
+    { name = "nornir-netmiko" },
     { name = "paramiko" },
     { name = "pydantic" },
 ]
 
 [package.dev-dependencies]
 dev = [
+    { name = "anyio" },
     { name = "bandit" },
     { name = "docsig" },
     { name = "docvet" },
@@ -1586,12 +1588,14 @@ requires-dist = [
     { name = "napalm", specifier = ">=5.0" },
     { name = "nornir", specifier = ">=3.4" },
     { name = "nornir-napalm", specifier = ">=0.4" },
+    { name = "nornir-netmiko", specifier = ">=1.0.1" },
     { name = "paramiko", specifier = "<5.0.0" },
     { name = "pydantic", specifier = ">=2.0" },
 ]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "anyio", specifier = ">=4.15.0" },
     { name = "bandit", specifier = ">=1.9.4" },
     { name = "docsig", specifier = ">=0.92.2" },
     { name = "docvet", specifier = ">=1.15.1" },
@@ -1615,6 +1619,18 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/7f/c9/c608bdc2ae351599b1d2a5524cd1548516aa805f47a0077fc9f468df2667/nornir_napalm-0.6.0.tar.gz", hash = "sha256:428f41bf498aa48de893e39c6d6acee39a9376c0decd8f4eba2f40e18ea266b2", size = 8887, upload-time = "2026-08-03T08:07:08.635Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/96/a6/2aee8347b02b42d06afdd09a89f76a391f17889cb0302539cc9eb45b3896/nornir_napalm-0.6.0-py3-none-any.whl", hash = "sha256:4202eed96d269565cb3da9683ba326c0be751985aebe0b8fd3a33ce9b7389074", size = 13321, upload-time = "2026-08-03T08:07:07.491Z" },
+]
+
+[[package]]
+name = "nornir-netmiko"
+version = "1.0.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "netmiko" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/94/00/ddd0b87d3493f7c853798d86f3b37fbb7decc4b5b30bd473e0f4565bc96d/nornir_netmiko-1.0.1.tar.gz", hash = "sha256:498546df001e0e499f10c5646d1356e361ccbb165b1335b89cfe8f19765e24d7", size = 7838, upload-time = "2023-12-07T18:18:34.364Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/13/16/63764c64087f14b2cd66f205da8570dfc13887ec43aa668de0c55a3ff92b/nornir_netmiko-1.0.1-py3-none-any.whl", hash = "sha256:eaee2944ad386b40c0719e8ac393ac63d531f44fb9a07d660bae7de430f12834", size = 11518, upload-time = "2023-12-07T18:18:33.369Z" },
 ]
 
 [[package]]

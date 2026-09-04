@@ -1,4 +1,4 @@
-"""Allow running as ``python -m nornir_napalm_mcp``."""
+"""Allow running as ``python -m nornir_mcp``."""
 
 from __future__ import annotations
 

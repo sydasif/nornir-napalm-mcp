@@ -2,41 +2,53 @@
 
 from __future__ import annotations
 
-import logging
-
 import napalm
+from napalm.base import NetworkDriver
 
 from nornir_mcp.models import GetterInfo
 from nornir_mcp.runner import get_nornir
-
-log = logging.getLogger("nornir-napalm-mcp")
 
 
 def list_getters() -> list[GetterInfo]:
     """Lists available NAPALM getters for each platform in the inventory.
 
-    Introspects the NAPALM driver for each unique platform to discover
-    which getters are supported. No device connection is required.
+    Introspects each platform's NAPALM driver class and reports only
+    getters the driver actually overrides. Base-class stubs that merely
+    raise ``NotImplementedError`` are excluded so unsupported getters are
+    never advertised. Caveat: a handful of base-level generic getters
+    implemented directly on ``NetworkDriver`` may be excluded as a side
+    effect — under-reporting is the safe failure mode for a discovery tool.
+
+    Hosts with ``platform=None`` are skipped entirely. Platforms whose
+    driver cannot be introspected surface the failure in the returned
+    :class:`GetterInfo.error` field instead of an empty list plus a log
+    line.
 
     Returns:
-        A list of GetterInfo objects, one per platform, each containing
-        the platform name and a sorted list of available getter names.
+        A list of GetterInfo objects, one per unique platform, each
+        containing the platform name, a sorted list of overridden getter
+        names (unprefixed), and an optional error description.
     """
     nr = get_nornir()
-    platforms = {str(host.platform) for host in nr.inventory.hosts.values()}
+    platforms = {
+        str(host.platform) for host in nr.inventory.hosts.values() if host.platform is not None
+    }
 
     results: list[GetterInfo] = []
     for platform in sorted(platforms):
+        error: str | None = None
         try:
-            driver = napalm.get_network_driver(platform)
+            driver_cls = napalm.get_network_driver(platform)
             getters = sorted(
                 name.removeprefix("get_")
-                for name in dir(driver)
-                if name.startswith("get_") and callable(getattr(driver, name))
+                for name in dir(driver_cls)
+                if name.startswith("get_")
+                and callable(getattr(driver_cls, name))
+                and getattr(driver_cls, name) is not getattr(NetworkDriver, name, None)
             )
-        except Exception as e:
-            log.warning("Could not introspect driver for platform '%s': %s", platform, e)
+        except Exception as exc:
             getters = []
-        results.append(GetterInfo(platform=platform, getters=getters))
+            error = str(exc)
+        results.append(GetterInfo(platform=platform, getters=getters, error=error))
 
     return results

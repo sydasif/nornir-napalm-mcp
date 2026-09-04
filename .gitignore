@@ -20,3 +20,5 @@ coverage.xml
 *.pdf
 config.yaml
 inventory/
+backups/
+audit/

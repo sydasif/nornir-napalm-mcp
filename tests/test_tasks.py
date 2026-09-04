@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from nornir_mcp.models import HostResult
-from nornir_mcp.tasks import _filter_devices, _result_to_dict
+from nornir_mcp.errors import ValidationError
+from nornir_mcp.responses import HostOutcome
+from nornir_mcp.tasks import _filter_devices, _results_to_outcomes
 from tests.conftest import (
     FakeGroup,
     FakeHost,
@@ -67,61 +68,74 @@ def test_filter_devices_by_platform() -> None:
     assert set(filtered.inventory.hosts._hosts.keys()) == {"r1"}
 
 
+def test_empty_name_list_raises_validation_error() -> None:
+    """An explicitly empty name selection is an error, not 'all devices'."""
+    nr = FakeNornir(FakeInventory(FakeHosts({})))
+    with pytest.raises(ValidationError, match="explicitly empty device list provided"):
+        _filter_devices(nr, name=[])
+    with pytest.raises(ValidationError, match="explicitly empty device list provided"):
+        _filter_devices(nr, name="")
+
+
+def test_no_filters_targets_all_devices() -> None:
+    """Omitted filters target the entire inventory."""
+    hosts = {
+        "a": FakeHost(name="a", hostname="10.0.0.1", platform="eos", groups=[]),
+        "b": FakeHost(name="b", hostname="10.0.0.2", platform="eos", groups=[]),
+    }
+    nr = FakeNornir(FakeInventory(FakeHosts(hosts)))
+    filtered = _filter_devices(nr)
+    assert set(filtered.inventory.hosts._hosts.keys()) == {"a", "b"}
+
+
 # ---------------------------------------------------------------------------
-# _result_to_dict
+# _results_to_outcomes
 # ---------------------------------------------------------------------------
 
 
-def test_result_to_dict_success() -> None:
-    """Verify _result_to_dict maps successful results to HostResult(ok=True)."""
+def test_results_to_outcomes_success() -> None:
+    """Verify successful hosts map to a success outcome with the raw data."""
     result = {"spine-01": FakeHostResult([FakeTaskResult(result={"facts": {}})])}
-    out = _result_to_dict(result)  # type: ignore[arg-type]
-    assert out == {"spine-01": HostResult(ok=True, data={"facts": {}})}
+    out = _results_to_outcomes(result, "nornir_get_facts")  # type: ignore[arg-type]
+    assert out == {"spine-01": HostOutcome(success=True, data={"facts": {}})}
 
 
-def test_result_to_dict_failed_with_exception() -> None:
-    """Verify _result_to_dict surfaces the exception message on failure."""
+def test_results_to_outcomes_failed_with_exception() -> None:
+    """Verify exceptions become a retryable 'connection' structured error."""
     result = {
         "leaf-01": FakeHostResult(
             [FakeTaskResult(result={}, failed=True, exception=RuntimeError("boom"))]
         )
     }
-    out = _result_to_dict(result)  # type: ignore[arg-type]
-    assert out == {"leaf-01": HostResult(ok=False, error="boom")}
+    out = _results_to_outcomes(result, "nornir_run_getter")  # type: ignore[arg-type]
+    outcome = out["leaf-01"]
+    assert outcome.success is False
+    assert outcome.data is None
+    assert outcome.error is not None
+    assert outcome.error.type == "connection"
+    assert outcome.error.retryable is True
+    assert outcome.error.host == "leaf-01"
+    assert outcome.error.operation == "nornir_run_getter"
+    assert outcome.error.message == "boom"
 
 
-def test_result_to_dict_failed_without_exception() -> None:
-    """Verify _result_to_dict falls back to the result string on failure."""
+def test_results_to_outcomes_failed_without_exception() -> None:
+    """Verify result-string failures become a non-retryable internal error."""
     result = {"leaf-01": FakeHostResult([FakeTaskResult(result="bad output", failed=True)])}
-    out = _result_to_dict(result)  # type: ignore[arg-type]
-    assert out == {"leaf-01": HostResult(ok=False, error="bad output")}
+    out = _results_to_outcomes(result, "nornir_run_getter")  # type: ignore[arg-type]
+    outcome = out["leaf-01"]
+    assert outcome.success is False
+    assert outcome.error is not None
+    assert outcome.error.type == "internal"
+    assert outcome.error.retryable is False
+    assert outcome.error.message == "bad output"
 
 
-def test_result_to_dict_empty_tasks() -> None:
-    """Verify _result_to_dict flags hosts with no tasks returned."""
+def test_results_to_outcomes_empty_tasks() -> None:
+    """Verify hosts with no tasks returned are flagged as failures."""
     result = {"leaf-01": FakeHostResult([])}
-    out = _result_to_dict(result)  # type: ignore[arg-type]
-    assert out == {"leaf-01": HostResult(ok=False, error="No tasks returned for host")}
-
-
-def test_result_to_dict_config_style_with_diff() -> None:
-    """Verify _result_to_dict extracts diff/changed for config-style Results."""
-    result = {
-        "spine-01": FakeHostResult(
-            [FakeTaskResult(result="", diff="--- a\n+++ b\n+hostname foo\n", changed=True)]
-        )
-    }
-    out = _result_to_dict(result, config_style=True)  # type: ignore[arg-type]
-    assert out == {
-        "spine-01": HostResult(
-            ok=True,
-            data={"diff": "--- a\n+++ b\n+hostname foo\n", "changed": True, "result": ""},
-        )
-    }
-
-
-def test_result_to_dict_config_style_no_diff() -> None:
-    """Verify config-style with empty diff still yields a clean data dict."""
-    result = {"spine-01": FakeHostResult([FakeTaskResult(result="Rollback completed")])}
-    out = _result_to_dict(result, config_style=True)  # type: ignore[arg-type]
-    assert out["spine-01"].data == {"diff": "", "changed": False, "result": "Rollback completed"}
+    out = _results_to_outcomes(result, "nornir_get_facts")  # type: ignore[arg-type]
+    outcome = out["leaf-01"]
+    assert outcome.success is False
+    assert outcome.error is not None
+    assert outcome.error.message == "No tasks returned for host"

@@ -72,11 +72,11 @@ class TestExpandConfig:
             "runner": {"plugin": "threaded"},
         }
         result = runner._expand_config(config, tmp_path)
-        inv = result["inventory"]["options"]  # type: ignore[index]
+        inv = result["inventory"]["options"]
         assert inv["host_file"] == str((tmp_path / "inventory" / "hosts.yaml").resolve())
         assert inv["group_file"] == str((tmp_path / "inventory" / "groups.yaml").resolve())
-        assert result["inventory"]["plugin"] == "SimpleInventory"  # type: ignore[index]
-        assert result["runner"]["plugin"] == "threaded"  # type: ignore[index]
+        assert result["inventory"]["plugin"] == "SimpleInventory"
+        assert result["runner"]["plugin"] == "threaded"
 
     def test_non_string_passthrough(self, tmp_path: Path) -> None:
         """Non-string, non-collection values pass through unchanged."""

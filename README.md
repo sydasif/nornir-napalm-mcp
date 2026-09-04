@@ -12,9 +12,9 @@
 
 # Nornir-NAPALM FastMCP Server
 
-A FastMCP server that exposes live network device state to AI assistants via NAPALM getters. Nornir handles inventory loading and concurrent device connections over SSH, eAPI, and NETCONF.
+A FastMCP server that exposes live network device state to AI assistants via NAPALM getters and CLI commands. Nornir handles inventory loading and concurrent device connections over SSH, eAPI, and NETCONF.
 
-All tools are **read-only** — there is no way to modify device configuration through this server.
+Reads are free; **writes are gated**. `nornir_apply_config` (dry-run by default) and `nornir_save_config` are the only tools that touch device state, and every write is policy-screened, pre-change-backed up (fail-closed), transcript-parsed, and audit-logged. Every response is a structured envelope with an explicit success flag (spec §21).
 
 ---
 
@@ -28,12 +28,37 @@ All tools are **read-only** — there is no way to modify device configuration t
 | `nornir_get_config`       | Retrieve running and/or startup configuration from a device                 |
 | `nornir_list_getters`     | Introspect available NAPALM getters for each platform in the inventory      |
 | `nornir_reload_inventory` | Re-read YAML inventory from disk                                            |
+| `nornir_run_command`      | Run one read-only CLI command (READ_ONLY/SAFE_OPERATIONAL only, per device)  |
+| `nornir_run_commands`     | Run a batch of read-only CLI commands; rejected commands fail only themselves |
+| `nornir_backup_config`    | Capture and store the running config as an immutable backup (rollback substrate) |
+| `nornir_list_backups`     | List stored backups for a device, oldest first                              |
+| `nornir_apply_config`     | Plan (dry-run by default) and apply config lines; pre-change backups are mandatory and fail-closed |
+| `nornir_save_config`      | Persist running config to startup/NVRAM — explicit-only, never called implicitly by apply (spec §11) |
 
-- **All operations are read-only.**
+- **Writes are gated.** `nornir_apply_config` and `nornir_save_config` are the only write tools. Apply dry-runs by default, rejects DANGEROUS/BLOCKED lines per device, always captures a pre-change backup (fail-closed: a failed backup means the device is never touched), and reports transcript errors honestly. Saving to NVRAM is a separate, explicit, audited step.
 - **Lazy initialization** — server starts even with a broken inventory, exposing the tool catalogue for inspection.
 - **Singleton caching** — Nornir instance is initialized once and reused across requests. Failed-device quarantine (`failed_hosts`) is reset before every call so dropped devices are available again on the next request.
 - **Flexible filtering** — filter by device name, group, or platform on any tool.
 - **HTTP and STDIO transport** — run locally for Claude Desktop or expose over HTTP.
+
+## Safety model
+
+Every command is classified into one of six categories per platform (`ios` / `eos` rulesets — anything else defaults to UNKNOWN and is denied):
+
+| Category | Read tools (`nornir_run_command*`) | Apply (`nornir_apply_config`) |
+| -------- | --------------------------------- | ----------------------------- |
+| `READ_ONLY` (`show …`) | ✅ allowed | allowed |
+| `SAFE_OPERATIONAL` (`ping`, `traceroute`) | ✅ allowed | allowed |
+| `CONFIGURATION` (`interface`, `ip route`, …) | ❌ rejected | ✅ allowed |
+| `UNKNOWN` | ❌ rejected (deny by default) | ✅ allowed (fails on-device if bad) |
+| `DANGEROUS` (`reload`) | ❌ rejected | ❌ rejected |
+| `BLOCKED` (`write erase`, `wr e`, …) | ❌ rejected | ❌ rejected |
+
+- Abbreviated forms (`wr e`, `conf t`, `rel`) are expanded before classification — abbreviated and full forms behave identically.
+- Newline/control-character injection is **structurally impossible**: multi-line input is rejected before any device is touched.
+- Every change gets an immutable pre-change backup (0600 perms, sha256 sidecar) — if the backup fails, the device is never touched. Backups are the rollback substrate for a future rollback tool.
+- Applied configs are transcript-parsed heuristically; a detected device error is never reported as success, and `device_state` stays honestly "unknown" (no read-back in v1).
+- All writes are appended to an audit log with change ids and sha256 hashes — never config text.
 
 ## Prerequisites
 
@@ -109,9 +134,12 @@ Register this server with any MCP client (Claude Desktop, VS Code, etc.) by addi
 
 ### Environment variables
 
-| Variable        | Default      | Description                         |
-| --------------- | ------------ | ----------------------------------- |
-| `NORNIR_CONFIG` | — (required) | Path to the Nornir bootstrap config |
+| Variable                    | Default        | Description                                    |
+| --------------------------- | -------------- | ---------------------------------------------- |
+| `NORNIR_CONFIG`             | — (required)   | Path to the Nornir bootstrap config            |
+| `NORNIR_MCP_BACKUP_DIR`     | `./backups`    | Root directory for immutable backups           |
+| `NORNIR_MCP_AUDIT_DIR`      | `./audit`      | Root directory for the append-only audit log   |
+| `NORNIR_MCP_MAX_OUTPUT_BYTES` | `65536`      | Per-output truncation budget (spec §21.1)      |
 
 ---
 
@@ -171,23 +199,37 @@ NORNIR_CONFIG=/path/to/config.yaml uv run python -m nornir_mcp
 ## Project Structure
 
 ```
-nornir-napalm-mcp/
+nornir-mcp/
 ├── nornir_mcp/
 │   ├── __init__.py       # Package version
 │   ├── __main__.py       # python -m support
 │   ├── main.py           # CLI entry point (argparse, transport selection)
-│   ├── models.py         # Pydantic data models (InventoryDevice, GetterInfo, HostResult)
-│   ├── runner.py         # Nornir init, config loading, singleton caching, NornirLike protocol
-│   ├── tasks.py          # Task helpers: device filtering, execution, result normalization
+│   ├── models.py         # Pydantic data models (InventoryDevice, GetterInfo)
+│   ├── errors.py         # Categorized exceptions (McpError, ErrorType) with retryable policy
+│   ├── responses.py      # ToolEnvelope / HostOutcome response models and truncation
+│   ├── policy.py         # Command canonicalization + classification (READ/SAFE/CONFIG/DANGEROUS/BLOCKED/UNKNOWN)
+│   ├── capability.py     # Platform capability gate (netmiko device-type mapping)
+│   ├── storage.py        # Immutable backup storage (0600 files, sha256 sidecars, traversal-safe)
+│   ├── audit.py          # Append-only JSONL audit logger (hashes only, never config text)
+│   ├── changes.py        # Write-path orchestration: capture, plan, fail-closed backups, dry-run, transcript parse
+│   ├── runner.py         # Nornir init, config loading, singleton caching, execution lock, NornirLike protocol
+│   ├── tasks.py          # Task helpers: device filtering, execution, outcome normalization
 │   ├── introspection.py  # NAPALM getter discovery per platform
-│   ├── server.py         # FastMCP server instance and the 6 tool definitions
+│   ├── server.py         # FastMCP server instance and the 12 tool definitions
 │   └── py.typed          # PEP 561 marker for downstream type checking
 ├── tests/
-│   ├── conftest.py       # Fake Nornir stubs and pytest fixtures
-│   ├── test_server.py    # Unit tests for the 6 MCP tools and inventory listing
-│   ├── test_tasks.py     # Unit tests for device filtering and task execution
-│   ├── test_cli.py       # Unit tests for the CLI entry points
-│   └── test_runner.py    # Unit tests for config loading and path expansion
+│   ├── conftest.py       # Fake Nornir stubs, fake netmiko tasks, pytest fixtures
+│   ├── test_server.py    # Unit tests for the 12 MCP tools, envelope contract, tool-surface pin
+│   ├── test_policy.py    # Canonicalization, classification, config-line gating
+│   ├── test_capability.py# Capability gate + netmiko fakes
+│   ├── test_storage.py   # Immutable backup storage
+│   ├── test_audit.py     # Audit logger
+│   ├── test_tasks.py     # Device filtering and task execution
+│   ├── test_runner.py    # Config loading and path expansion
+│   ├── test_locking.py   # Global execution lock
+│   ├── test_changes.py   # Planning, pre-change backups, dry-run, transcript parsing
+│   ├── test_e2e.py       # Full-stack tests through the MCP protocol layer
+│   ├── test_cli.py       # CLI entry points
 ├── config.example.yaml   # Example Nornir configuration
 ├── pyproject.toml        # Build config, dependencies, and tool settings
 ├── uv.lock               # Locked dependencies
@@ -208,7 +250,7 @@ uv sync
 uv run pytest
 
 # Run tests with coverage
-uv run pytest --cov=nornir_napalm_mcp --cov-branch
+uv run pytest --cov=nornir_mcp --cov-branch
 
 # Lint
 uv run ruff check .

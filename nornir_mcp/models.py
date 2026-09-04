@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from pydantic import BaseModel, ConfigDict
 
 
@@ -19,24 +17,14 @@ class InventoryDevice(BaseModel):
 
 
 class GetterInfo(BaseModel):
-    """The NAPALM getters available for a given platform."""
+    """The NAPALM getters available for a given platform.
+
+    ``error`` is set (with ``getters`` empty) when the platform's driver
+    could not be introspected.
+    """
 
     model_config = ConfigDict(frozen=True)
 
     platform: str
     getters: list[str]
-
-
-class HostResult(BaseModel):
-    """Per-host outcome of a Nornir task.
-
-    Makes success/failure explicit in the return type rather than relying
-    on callers to duck-type whether a given host's entry is real getter
-    data or an error description.
-    """
-
-    model_config = ConfigDict(frozen=True)
-
-    ok: bool
-    data: Any | None = None
     error: str | None = None

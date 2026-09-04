@@ -1,11 +1,15 @@
-"""Shared task helpers — filtering, execution, and result normalization."""
+"""Shared task helpers — filtering, execution, and outcome normalization."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from nornir_mcp.models import HostResult
-from nornir_mcp.runner import NornirLike, get_nornir
+from nornir.core.task import Result
+from nornir_netmiko.tasks import netmiko_send_command
+
+from nornir_mcp.errors import DeviceConnectionError, ValidationError
+from nornir_mcp.responses import HostOutcome, StructuredError, outcome_from_mcp_error
+from nornir_mcp.runner import NornirLike, execution_lock, get_nornir
 
 if TYPE_CHECKING:
     from nornir.core.task import AggregatedResult
@@ -19,6 +23,8 @@ def _filter_devices(
 ) -> NornirLike:
     """Filters Nornir inventory by name, group, or platform.
 
+    Omit all filters to target every device in the inventory.
+
     Args:
         nr: The Nornir instance to filter.
         name: Device name or list of names to filter by.
@@ -29,10 +35,15 @@ def _filter_devices(
         A filtered Nornir instance containing only matching devices.
 
     Raises:
+        ValidationError: If *name* is an explicitly empty selection
+            (``[]`` or ``""``) — an empty selection is an error, not
+            "all devices".
         ValueError: If no devices match the provided filters.
     """
-    if name:
-        names = {name} if isinstance(name, str) else set(name)
+    if name is not None:
+        names = {name} if isinstance(name, str) and name else set(name)
+        if not names:
+            raise ValidationError("explicitly empty device list provided")
         nr = nr.filter(filter_func=lambda h: h.name in names)
     if group:
         nr = nr.filter(filter_func=lambda h: any(g.name == group for g in h.groups))
@@ -48,69 +59,113 @@ def _filter_devices(
     return nr
 
 
-def _result_to_dict(result: AggregatedResult, config_style: bool = False) -> dict[str, HostResult]:
-    """Converts a Nornir AggregatedResult into a dict of HostResult keyed by host.
+def _results_to_outcomes(result: AggregatedResult, operation: str) -> dict[str, HostOutcome]:
+    """Converts a Nornir AggregatedResult into per-host HostOutcomes.
 
     Args:
         result: The Nornir AggregatedResult to normalize.
-        config_style: When True, the task returned config-style Nornir ``Result``
-            objects whose diff/changed flags live on the ``Result`` itself
-            (e.g. ``napalm_configure``). The normalized ``data`` then becomes
-            ``{"diff", "changed", "result"}`` instead of the raw ``.result``.
+        operation: The tool/operation name, attached to any error payloads.
 
     Returns:
-        A dict mapping each host name to its HostResult.
+        A dict mapping each host name to its HostOutcome. A host that
+        failed with an exception becomes a retryable ``connection`` error
+        (transient transport failures are the most common cause); a host
+        that failed without an exception becomes a non-retryable
+        ``internal`` error carrying the result's message.
     """
-    output: dict[str, HostResult] = {}
+    output: dict[str, HostOutcome] = {}
     for host, multi_result in result.items():
         if not multi_result:
-            output[host] = HostResult(ok=False, error="No tasks returned for host")
+            output[host] = HostOutcome(
+                success=False,
+                data=None,
+                error=StructuredError(
+                    type="internal",
+                    message="No tasks returned for host",
+                    host=host,
+                    operation=operation,
+                    retryable=False,
+                ),
+            )
             continue
         if multi_result.failed:
             failure = multi_result[0].exception or multi_result[0].result
-            output[host] = HostResult(ok=False, error=str(failure))
+            if isinstance(failure, Exception):
+                output[host] = outcome_from_mcp_error(
+                    DeviceConnectionError(str(failure), host=host, operation=operation)
+                )
+            else:
+                output[host] = HostOutcome(
+                    success=False,
+                    data=None,
+                    error=StructuredError(
+                        type="internal",
+                        message=str(failure),
+                        host=host,
+                        operation=operation,
+                        retryable=False,
+                    ),
+                )
             continue
         task_result = multi_result[0]
-        if config_style:
-            output[host] = HostResult(
-                ok=True,
-                data={
-                    "diff": task_result.diff or "",
-                    "changed": bool(task_result.changed),
-                    "result": task_result.result or "",
-                },
-            )
-        else:
-            output[host] = HostResult(ok=True, data=task_result.result)
+        output[host] = HostOutcome(success=True, data=task_result.result)
     return output
 
 
 def run_nornir_task(
     task: Any,
+    operation: str,
     name: str | list[str] | None = None,
     group: str | None = None,
     platform: str | None = None,
-    config_style: bool = False,
     **task_kwargs: Any,
-) -> dict[str, HostResult]:
-    """Run a Nornir task against filtered devices and return HostResult dict.
+) -> dict[str, HostOutcome]:
+    """Run a Nornir task against filtered devices and return host outcomes.
 
     Args:
         task: The Nornir task function to execute.
+        operation: The tool/operation name, used in error construction.
         name: Device name or list of names to target.
         group: Group name to filter devices by.
         platform: Platform name to filter devices by.
-        config_style: Forwarded to ``_result_to_dict``; set True for config tasks
-            whose ``Result`` carries diff/changed data on the object itself.
 
     Other Parameters:
         **task_kwargs: Additional keyword arguments passed to the task.
 
     Returns:
-        A dictionary mapping each device name to a HostResult.
+        A dictionary mapping each device name to its HostOutcome.
+
+    Raises:
+        ValueError: If no devices match the provided filters.
     """
-    nr: NornirLike = get_nornir()
-    nr.data.reset_failed_hosts()
-    nr = _filter_devices(nr, name=name, group=group, platform=platform)
-    result = nr.run(task=task, **task_kwargs)
-    return _result_to_dict(result, config_style=config_style)
+    with execution_lock():
+        nr: NornirLike = get_nornir()
+        nr.data.reset_failed_hosts()
+        nr = _filter_devices(nr, name=name, group=group, platform=platform)
+        result = nr.run(task=task, **task_kwargs)
+        return _results_to_outcomes(result, operation)
+
+
+def netmiko_send_commands(task: Any, commands: list[str] | None = None, **kwargs: Any) -> Any:
+    """Run a batch of read-only commands over a netmiko connection.
+
+    nornir-netmiko 1.0.x no longer ships a batch plugin, so this in-house
+    task replicates the classic plugin semantics: each command is sent via
+    ``netmiko_send_command`` and collected into ``{hostname: {command:
+    output}}``. Tests replace the server-level name with the canned
+    ``fake_netmiko_send_commands`` (see conftest), which records exactly
+    which commands were sent.
+
+    Args:
+        task: The Nornir task for the target host.
+        commands: The commands to run, in order.
+
+    Returns:
+        A Nornir ``Result`` whose ``result`` maps the hostname to a
+        per-command output dict.
+    """
+    outputs: dict[str, str] = {}
+    for command in commands or []:
+        result = netmiko_send_command(task, command_string=command, **kwargs)
+        outputs[command] = result.result
+    return Result(host=task.host, result={task.host.name: outputs})

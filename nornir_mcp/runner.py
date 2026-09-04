@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import os
+import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
 from functools import cache
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
@@ -10,6 +13,35 @@ from typing import Any, Protocol, runtime_checkable
 import yaml
 from nornir import InitNornir
 from nornir.core import Nornir
+
+# Serializes every device-touching run. FastMCP executes sync tools in a
+# threadpool while ``get_nornir()`` is a process-wide singleton, so two
+# overlapping calls can race on Nornir's GlobalState (one call's
+# ``reset_failed_hosts()`` firing mid-flight in another). One reentrant
+# lock makes this structurally impossible.
+EXECUTION_LOCK = threading.RLock()
+
+
+@contextmanager
+def execution_lock() -> Iterator[None]:
+    """Hold the global execution lock for the duration of a task run.
+
+    Correctness-first tradeoff: this serializes all device-touching runs at
+    the MCP level, guaranteeing that Nornir's shared GlobalState is never
+    mutated concurrently. Concurrency *within* a run is preserved — Nornir
+    still fans out to per-host workers. Per-host locking is a documented
+    future extension should throughput demand it.
+
+    Reentrant (``RLock``): a future caller that already holds the lock may
+    call ``run_nornir_task`` (or nest another ``execution_lock``) without
+    deadlocking.
+
+    Yields:
+        Nothing; the lock is released on exit.
+    """
+    with EXECUTION_LOCK:
+        yield
+
 
 # Keys whose string values are file paths that should be resolved relative
 # to the config file directory.
@@ -115,7 +147,7 @@ def _expand_str(value: str) -> str:
     return os.path.expandvars(os.path.expanduser(value))
 
 
-def _expand_config(value: object, config_dir: Path) -> object:
+def _expand_config(value: object, config_dir: Path) -> Any:
     """Recursively expand ``~`` and ``$VAR`` in configuration strings.
 
     ``~`` and environment variables (``$HOME``, ``${VAR}``) are expanded in
