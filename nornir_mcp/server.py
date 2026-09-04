@@ -23,7 +23,6 @@ from nornir_mcp.audit import get_audit_logger
 from nornir_mcp.capability import netmiko_device_type
 from nornir_mcp.changes import (
     capture_pre_change_backups,
-    capture_running_config,
     dry_run_outcomes,
     parse_config_transcript,
     plan_change,
@@ -31,13 +30,11 @@ from nornir_mcp.changes import (
 from nornir_mcp.errors import (
     BackupError,
     CommandRejectedError,
-    InternalError,
     McpError,
     UnsupportedOperationError,
     ValidationError,
 )
 from nornir_mcp.introspection import list_getters
-from nornir_mcp.models import InventoryDevice
 from nornir_mcp.policy import assert_read_allowed, canonicalize
 from nornir_mcp.responses import (
     HostOutcome,
@@ -46,14 +43,33 @@ from nornir_mcp.responses import (
     maybe_truncate,
     outcome_from_mcp_error,
 )
-from nornir_mcp.runner import execution_lock, get_nornir, reset_nornir
-from nornir_mcp.storage import get_backup_store
+from nornir_mcp.runner import execution_lock, get_nornir
 from nornir_mcp.tasks import _filter_devices, netmiko_send_commands, run_nornir_task
+from nornir_mcp.tools.base.tool import NornirBase
 
 mcp = FastMCP(
     name="Nornir-NAPALM Server",
     instructions="Query network devices via NAPALM. Call nornir_list_inventory first.",
 )
+
+# Phase-2 compat: re-export the 4 NornirBase tools so existing test
+# references like ``server.nornir_list_inventory(...)`` still resolve.
+# The actual definition lives in ``tools.base.tool``; these bound methods
+# are registered on the MCP server so the wire surface is unchanged.
+_nornir_base = NornirBase()
+for _tool in (
+    _nornir_base.nornir_list_inventory,
+    _nornir_base.nornir_reload_inventory,
+    _nornir_base.nornir_backup_config,
+    _nornir_base.nornir_list_backups,
+):
+    mcp.tool(name=_tool.__name__)(_tool)
+
+# Module-level aliases for direct-call tests (``server.nornir_list_inventory``).
+nornir_list_inventory = _nornir_base.nornir_list_inventory
+nornir_reload_inventory = _nornir_base.nornir_reload_inventory
+nornir_backup_config = _nornir_base.nornir_backup_config
+nornir_list_backups = _nornir_base.nornir_list_backups
 
 
 def _request_id(ctx: Context | None) -> str:
@@ -236,33 +252,6 @@ def _truncated_outputs(outcomes: dict[str, HostOutcome], command: str) -> dict[s
 
 
 @mcp.tool()
-def nornir_list_inventory(ctx: Context) -> ToolEnvelope:
-    """Lists all devices in the Nornir inventory.
-
-    Returns:
-        A ToolEnvelope whose ``results["server"].data`` is a sorted list of
-        InventoryDevice objects, each containing the device name, hostname,
-        platform, and group membership. The ``"server"`` pseudo-host key is
-        used for non-per-host results (see responses.py).
-    """
-    nr = get_nornir()
-    devices = [
-        InventoryDevice(
-            name=host.name,
-            hostname=str(host.hostname),
-            platform=str(host.platform),
-            groups=[g.name for g in host.groups],
-        )
-        for host in sorted(nr.inventory.hosts.values(), key=lambda h: h.name)
-    ]
-    return ToolEnvelope(
-        operation="nornir_list_inventory",
-        request_id=_request_id(ctx),
-        results={"server": HostOutcome(success=True, data=devices)},
-    )
-
-
-@mcp.tool()
 def nornir_get_facts(
     ctx: Context,
     name: str | list[str] | None = None,
@@ -415,26 +404,6 @@ def nornir_list_getters(ctx: Context) -> ToolEnvelope:
         operation="nornir_list_getters",
         request_id=_request_id(ctx),
         results={"server": HostOutcome(success=True, data=list_getters())},
-    )
-
-
-@mcp.tool()
-def nornir_reload_inventory(ctx: Context) -> ToolEnvelope:
-    """Reloads the network inventory from disk.
-
-    Discards the in-memory inventory cache and re-reads YAML files.
-    Use after editing the inventory files to pick up changes.
-
-    Returns:
-        A ToolEnvelope with empty results and request-level success (the
-        operation has no per-host output; see responses.py for the
-        empty-envelope choice).
-    """
-    reset_nornir()
-    return ToolEnvelope(
-        operation="nornir_reload_inventory",
-        request_id=_request_id(ctx),
-        results={},
     )
 
 
@@ -629,116 +598,6 @@ def nornir_run_commands(
             )
 
     return ToolEnvelope(operation=operation, request_id=request_id, results=outcomes)
-
-
-@mcp.tool()
-def nornir_backup_config(
-    name: str | list[str] | None = None,
-    group: str | None = None,
-    platform: str | None = None,
-    ctx: Context | None = None,
-) -> ToolEnvelope:
-    """Captures and stores the running configuration for device(s).
-
-    Reads each device's running config (NAPALM, falling back to the CLI
-    for platforms without a NAPALM driver) and stores it as an immutable
-    backup. These backups are the rollback substrate for
-    nornir_apply_config, which requires a pre-change backup before any
-    change (spec §8.2). One host's capture failure does not stop the
-    others. An audit line is appended (hashes only — never config text).
-
-    Omit all filters to target every device in the inventory.
-
-    Args:
-        name: Device name or list of names to back up.
-        group: Group name to filter devices by.
-        platform: Platform name to filter devices by.
-
-    Returns:
-        A ToolEnvelope with one HostOutcome per device. Successful
-        outcomes carry ``data = {"backup_id", "path", "sha256", "size",
-        "timestamp"}``.
-    """
-    operation = "nornir_backup_config"
-    request_id = _request_id(ctx)
-
-    error, targets = _select_targets(operation, request_id, name, group, platform)
-    if error is not None:
-        return error
-    assert targets is not None
-
-    store = get_backup_store()
-    outcomes: dict[str, HostOutcome] = {}
-    shas: dict[str, str] = {}
-    for host in targets.inventory.hosts.values():
-        hostname = host.name
-        try:
-            content = capture_running_config(hostname, str(host.platform), request_id)
-            record = store.save(hostname, content, trigger="standalone")
-        except McpError as exc:
-            outcomes[hostname] = outcome_from_mcp_error(exc)
-        except Exception as exc:  # noqa: BLE001 — per-host isolation
-            outcomes[hostname] = outcome_from_mcp_error(
-                InternalError(str(exc), host=hostname, operation=operation)
-            )
-        else:
-            shas[hostname] = record.sha256
-            outcomes[hostname] = HostOutcome(
-                success=True,
-                data={
-                    "backup_id": record.backup_id,
-                    "path": record.path,
-                    "sha256": record.sha256,
-                    "size": record.size,
-                    "timestamp": record.timestamp,
-                },
-            )
-
-    successes = sum(1 for o in outcomes.values() if o.success)
-    if not outcomes:
-        result = "no_hosts"
-    elif successes == len(outcomes):
-        result = "success"
-    elif successes == 0:
-        result = "failed"
-    else:
-        result = "partial"
-    get_audit_logger().record(
-        operation,
-        request_id,
-        hosts=list(outcomes),
-        result=result,
-        details={"sha256": shas},
-    )
-    return ToolEnvelope(operation=operation, request_id=request_id, results=outcomes)
-
-
-@mcp.tool()
-def nornir_list_backups(host: str, ctx: Context | None = None) -> ToolEnvelope:
-    """Lists the stored backups for one device, oldest first.
-
-    These backups are the rollback substrate for nornir_apply_config
-    (arriving with the apply path). Host names are validated against path
-    traversal before any filesystem access.
-
-    Args:
-        host: Device name whose backups to list.
-
-    Returns:
-        A ToolEnvelope whose ``results["server"].data`` is the list of
-        BackupRecord metadata (oldest first).
-    """
-    operation = "nornir_list_backups"
-    request_id = _request_id(ctx)
-    try:
-        records = get_backup_store().list(host)
-    except ValidationError as exc:
-        return _validation_envelope(operation, request_id, exc.message)
-    return ToolEnvelope(
-        operation=operation,
-        request_id=request_id,
-        results={"server": HostOutcome(success=True, data=records)},
-    )
 
 
 @mcp.tool()

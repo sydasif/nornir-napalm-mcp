@@ -33,22 +33,17 @@ from collections.abc import Callable
 from typing import Any
 from uuid import uuid4
 
-import napalm
-from nornir_napalm.plugins.tasks import napalm_get
-from nornir_netmiko.tasks import netmiko_send_command
 from pydantic import BaseModel
 
 from nornir_mcp.capability import netmiko_device_type
 from nornir_mcp.errors import (
     BackupError,
-    DeviceConnectionError,
-    InternalError,
     UnsupportedOperationError,
 )
 from nornir_mcp.policy import PolicyViolation, validate_config_lines
 from nornir_mcp.responses import HostOutcome, StructuredError, maybe_truncate
 from nornir_mcp.storage import BackupRecord, BackupStore, get_backup_store
-from nornir_mcp.tasks import run_nornir_task
+from nornir_mcp.tools.base.capture import capture_running_config  # backwards-compat re-export
 
 # Operation labels attached to errors for traceability.
 _CAPTURE_OPERATION = "config_capture"
@@ -61,88 +56,6 @@ CONFIG_ERROR_PATTERNS: dict[str, list[str]] = {
     "ios": [r"% Invalid input", r"% Incomplete command", r"% Ambiguous command"],
     "eos": [r"Error:", r"% Invalid", r"incomplete"],
 }
-
-
-def capture_running_config(host: str, platform: str, ctx_request_id: str) -> str:
-    """Return the running configuration for *host* as text.
-
-    Args:
-        host: Device name.
-        platform: NAPALM platform name (used to pick the capture engine).
-        ctx_request_id: Request correlation id, included in error messages.
-
-    Returns:
-        The running configuration text.
-
-    Raises:
-        DeviceConnectionError: If the device capture failed at connection
-            level (retryable).
-        InternalError: For any other capture failure (non-retryable).
-    """
-    try:
-        napalm.get_network_driver(platform)
-    except Exception:
-        # No NAPALM driver for this platform: fall back to the CLI.
-        return _capture_via_netmiko(host, ctx_request_id)
-    return _capture_via_napalm(host, ctx_request_id)
-
-
-def _capture_via_napalm(host: str, ctx_request_id: str) -> str:
-    outcomes = run_nornir_task(
-        napalm_get,
-        operation=_CAPTURE_OPERATION,
-        name=host,
-        getters=["config"],
-        getters_options={"config": {"retrieve": "running", "full": True}},
-    )
-    outcome = outcomes.get(host)
-    if outcome is None:
-        raise InternalError(
-            f"config capture for '{host}' returned no result (request {ctx_request_id})",
-            host=host,
-            operation=_CAPTURE_OPERATION,
-        )
-    if not outcome.success:
-        _raise_capture_error(outcome.error, host, ctx_request_id)
-    data = outcome.data if isinstance(outcome.data, dict) else {}
-    config = data.get("config") if isinstance(data, dict) else None
-    running = config.get("running") if isinstance(config, dict) else None
-    if not isinstance(running, str):
-        raise InternalError(
-            f"no running config text in capture for '{host}' (request {ctx_request_id})",
-            host=host,
-            operation=_CAPTURE_OPERATION,
-        )
-    return running
-
-
-def _capture_via_netmiko(host: str, ctx_request_id: str) -> str:
-    outcomes = run_nornir_task(
-        netmiko_send_command,
-        operation=_CAPTURE_OPERATION,
-        name=host,
-        command_string="show running-config",
-    )
-    outcome = outcomes.get(host)
-    if outcome is None:
-        raise InternalError(
-            f"config capture for '{host}' returned no result (request {ctx_request_id})",
-            host=host,
-            operation=_CAPTURE_OPERATION,
-        )
-    if not outcome.success:
-        _raise_capture_error(outcome.error, host, ctx_request_id)
-    return outcome.data if isinstance(outcome.data, str) else str(outcome.data or "")
-
-
-def _raise_capture_error(error: StructuredError | None, host: str, ctx_request_id: str) -> None:
-    """Convert a structured host failure into a categorized McpError."""
-    message = error.message if error is not None else "config capture failed"
-    if error is not None and error.type == "connection":
-        raise DeviceConnectionError(message, host=host, operation=_CAPTURE_OPERATION)
-    raise InternalError(
-        f"{message} (request {ctx_request_id})", host=host, operation=_CAPTURE_OPERATION
-    )
 
 
 class ChangePlan(BaseModel):

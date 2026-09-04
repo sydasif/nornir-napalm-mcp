@@ -689,10 +689,12 @@ def test_backup_config_napalm_unavailable_falls_back_to_netmiko(
 ) -> None:
     """Platforms without a NAPALM driver fall back to show running-config."""
     monkeypatch.setattr(
-        "nornir_mcp.changes.napalm.get_network_driver",
+        "nornir_mcp.tools.base.capture.napalm.get_network_driver",
         lambda _p: (_ for _ in ()).throw(ValueError("no driver")),
     )
-    monkeypatch.setattr("nornir_mcp.changes.netmiko_send_command", fake_netmiko_send_command)
+    monkeypatch.setattr(
+        "nornir_mcp.tools.base.capture.netmiko_send_command", fake_netmiko_send_command
+    )
 
     env = server.nornir_backup_config(name="spine-01", ctx=_ctx())
     assert env.success is True
@@ -720,7 +722,7 @@ def test_backup_config_partial_failure_preserves_successes(
 
     # Force the netmiko fallback and make it fail only for mx-01.
     monkeypatch.setattr(
-        "nornir_mcp.changes.napalm.get_network_driver",
+        "nornir_mcp.tools.base.capture.napalm.get_network_driver",
         lambda _p: (_ for _ in ()).throw(ValueError("no driver")),
     )
 
@@ -732,7 +734,7 @@ def test_backup_config_partial_failure_preserves_successes(
         return fake_netmiko_send_command(task, command_string=command_string, **kw)
 
     monkeypatch.setattr(
-        "nornir_mcp.changes.netmiko_send_command", fake_netmiko_send_command_failing
+        "nornir_mcp.tools.base.capture.netmiko_send_command", fake_netmiko_send_command_failing
     )
 
     env = server.nornir_backup_config(ctx=_ctx())
