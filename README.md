@@ -96,8 +96,8 @@ Register this server with any MCP client (Claude Desktop, VS Code, etc.) by addi
       "command": "uvx",
       "args": [
         "--from",
-        "git+https://github.com/sydasif/nornir-napalm-mcp",
-        "nornir-napalm-mcp"
+        "git+https://github.com/sydasif/nornir-mcp",
+        "nornir-mcp"
       ],
       "env": {
         "NORNIR_CONFIG": "/absolute/path/to/config.yaml"
@@ -143,7 +143,7 @@ Use `nornir_run_getter` with any of these:
 ### CLI help
 
 ```bash
-uv run nornir-napalm-mcp --help
+uv run nornir-mcp --help
 ```
 
 _Note: there is no CLI flag for listing inventory — use the `nornir_list_inventory` MCP tool instead._
@@ -151,19 +151,19 @@ _Note: there is no CLI flag for listing inventory — use the `nornir_list_inven
 ### Run as MCP server (STDIO)
 
 ```bash
-NORNIR_CONFIG=/path/to/config.yaml uv run nornir-napalm-mcp
+NORNIR_CONFIG=/path/to/config.yaml uv run nornir-mcp
 ```
 
 ### Run as HTTP server
 
 ```bash
-NORNIR_CONFIG=/path/to/config.yaml uv run nornir-napalm-mcp --transport http --host 0.0.0.0 --port 8000
+NORNIR_CONFIG=/path/to/config.yaml uv run nornir-mcp --transport http --host 0.0.0.0 --port 8000
 ```
 
 ### Run as Python module
 
 ```bash
-NORNIR_CONFIG=/path/to/config.yaml uv run python -m nornir_napalm_mcp
+NORNIR_CONFIG=/path/to/config.yaml uv run python -m nornir_mcp
 ```
 
 ---
@@ -172,7 +172,7 @@ NORNIR_CONFIG=/path/to/config.yaml uv run python -m nornir_napalm_mcp
 
 ```
 nornir-napalm-mcp/
-├── nornir_napalm_mcp/
+├── nornir_mcp/
 │   ├── __init__.py       # Package version
 │   ├── __main__.py       # python -m support
 │   ├── main.py           # CLI entry point (argparse, transport selection)
