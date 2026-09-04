@@ -76,7 +76,7 @@ for _tool in (
     _napalm_tools.nornir_get_config,
     _napalm_tools.nornir_list_getters,
 ):
-    mcp.tool(name=_tool.__name__)(_tool)
+    mcp.tool(name=_tool.__name__)(_tool)  # type: ignore[assignment]
 
 nornir_get_facts: Any = _napalm_tools.nornir_get_facts
 nornir_run_getter: Any = _napalm_tools.nornir_run_getter
