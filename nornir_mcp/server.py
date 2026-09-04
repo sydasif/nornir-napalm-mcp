@@ -6,13 +6,10 @@ The CLI entry point lives in ``main.py``.
 from __future__ import annotations
 
 import hashlib
-from typing import Any, Literal
+from typing import Any
 from uuid import uuid4
 
 from fastmcp import Context, FastMCP
-from nornir_napalm.plugins.tasks import (
-    napalm_get,
-)
 from nornir_netmiko.tasks import (
     netmiko_save_config,
     netmiko_send_command,
@@ -34,7 +31,6 @@ from nornir_mcp.errors import (
     UnsupportedOperationError,
     ValidationError,
 )
-from nornir_mcp.introspection import list_getters
 from nornir_mcp.policy import assert_read_allowed, canonicalize
 from nornir_mcp.responses import (
     HostOutcome,
@@ -46,6 +42,7 @@ from nornir_mcp.responses import (
 from nornir_mcp.runner import execution_lock, get_nornir
 from nornir_mcp.tasks import _filter_devices, netmiko_send_commands, run_nornir_task
 from nornir_mcp.tools.base.tool import NornirBase
+from nornir_mcp.tools.napalm.tool import NapalmTool
 
 mcp = FastMCP(
     name="Nornir-NAPALM Server",
@@ -65,11 +62,26 @@ for _tool in (
 ):
     mcp.tool(name=_tool.__name__)(_tool)
 
-# Module-level aliases for direct-call tests (``server.nornir_list_inventory``).
-nornir_list_inventory = _nornir_base.nornir_list_inventory
-nornir_reload_inventory = _nornir_base.nornir_reload_inventory
-nornir_backup_config = _nornir_base.nornir_backup_config
-nornir_list_backups = _nornir_base.nornir_list_backups
+# Module-level aliases for direct-call tests (``server.nornir_*``).
+nornir_list_inventory: Any = _nornir_base.nornir_list_inventory
+nornir_reload_inventory: Any = _nornir_base.nornir_reload_inventory
+nornir_backup_config: Any = _nornir_base.nornir_backup_config
+nornir_list_backups: Any = _nornir_base.nornir_list_backups
+
+# Phase-3 compat: re-export the 4 NapalmTool so existing test references still resolve.
+_napalm_tools = NapalmTool()
+for _tool in (
+    _napalm_tools.nornir_get_facts,
+    _napalm_tools.nornir_run_getter,
+    _napalm_tools.nornir_get_config,
+    _napalm_tools.nornir_list_getters,
+):
+    mcp.tool(name=_tool.__name__)(_tool)
+
+nornir_get_facts: Any = _napalm_tools.nornir_get_facts
+nornir_run_getter: Any = _napalm_tools.nornir_run_getter
+nornir_get_config: Any = _napalm_tools.nornir_get_config
+nornir_list_getters: Any = _napalm_tools.nornir_list_getters
 
 
 def _request_id(ctx: Context | None) -> str:
@@ -249,162 +261,6 @@ def _truncated_outputs(outcomes: dict[str, HostOutcome], command: str) -> dict[s
             },
         )
     return wrapped
-
-
-@mcp.tool()
-def nornir_get_facts(
-    ctx: Context,
-    name: str | list[str] | None = None,
-    group: str | None = None,
-    platform: str | None = None,
-) -> ToolEnvelope:
-    """Retrieves system facts from network device(s) via NAPALM.
-
-    Fetches device information such as hostname, vendor, model,
-    OS version, and serial number.
-
-    Omit all filters to target every device in the inventory.
-
-    Args:
-        name: Device name or list of names to query.
-        group: Group name to filter devices by.
-        platform: Platform name to filter devices by.
-
-    Returns:
-        A ToolEnvelope mapping each device name to a HostOutcome. On
-        success, ``data`` contains the facts dictionary; on failure,
-        ``error`` describes what went wrong. A request-level failure
-        (e.g. no devices match the filters) sets the envelope's
-        ``error`` to a ``validation`` StructuredError.
-    """
-    return _run_task_envelope(
-        ctx,
-        "nornir_get_facts",
-        napalm_get,
-        name=name,
-        group=group,
-        platform=platform,
-        getters=["facts"],
-    )
-
-
-@mcp.tool()
-def nornir_run_getter(
-    ctx: Context,
-    getter: str,
-    name: str | list[str] | None = None,
-    group: str | None = None,
-    platform: str | None = None,
-    getter_options: dict[str, Any] | None = None,
-) -> ToolEnvelope:
-    """Runs any supported NAPALM getter on network device(s).
-
-    Supports all standard NAPALM getters including arp_table, interfaces,
-    routes, vlans, and more. Use nornir_list_getters to discover available
-    getters for each platform. Use names exactly as returned by
-    nornir_list_getters (unprefixed); the server prefixes internally.
-
-    Omit all filters to target every device in the inventory.
-
-    Args:
-        getter: NAPALM getter name (e.g., 'arp_table', 'interfaces'),
-            unprefixed.
-        name: Device name or list of names to query.
-        group: Group name to filter devices by.
-        platform: Platform name to filter devices by.
-        getter_options: Optional getter-specific parameters passed to NAPALM.
-
-    Returns:
-        A ToolEnvelope mapping each device name to a HostOutcome containing
-        the getter result in ``data`` on success, or ``error`` on failure.
-    """
-    normalized = getter if getter.startswith("get_") else f"get_{getter}"
-    g_opts = {normalized: getter_options} if getter_options is not None else None
-    return _run_task_envelope(
-        ctx,
-        "nornir_run_getter",
-        napalm_get,
-        name=name,
-        group=group,
-        platform=platform,
-        getters=[normalized],
-        getters_options=g_opts,
-    )
-
-
-@mcp.tool()
-def nornir_get_config(
-    ctx: Context,
-    name: str | list[str] | None = None,
-    group: str | None = None,
-    platform: str | None = None,
-    retrieve: Literal["running", "startup", "all"] = "all",
-    full: bool = False,
-    sanitized: bool = True,
-    config_format: Literal["text", "json"] = "text",
-) -> ToolEnvelope:
-    """Retrieves device configuration from network device(s).
-
-    Fetches running and/or startup configuration using NAPALM's config getter.
-    By default output is sanitized: raw running configs commonly contain
-    password hashes and pre-shared keys, and ``sanitized=True`` strips them
-    so credentials are never exposed in MCP responses (spec §22).
-
-    Omit all filters to target every device in the inventory.
-
-    Args:
-        name: Device name or list of names to query.
-        group: Group name to filter devices by.
-        platform: Platform name to filter devices by.
-        retrieve: Which config to retrieve — 'running', 'startup', or 'all'.
-        full: If True, return the full configuration without filtering.
-        sanitized: If True (default), remove sensitive data from the output.
-        config_format: Configuration format — 'text' or 'json'.
-
-    Returns:
-        A ToolEnvelope mapping each device name to a HostOutcome. On
-        success, ``data`` contains the configuration dict with 'running'
-        and/or 'startup' keys. On failure, ``error`` describes what went
-        wrong.
-    """
-    getter_options = {
-        "config": {
-            "retrieve": retrieve,
-            "full": full,
-            "sanitized": sanitized,
-            "format": config_format,
-        }
-    }
-    return _run_task_envelope(
-        ctx,
-        "nornir_get_config",
-        napalm_get,
-        name=name,
-        group=group,
-        platform=platform,
-        getters=["config"],
-        getters_options=getter_options,
-    )
-
-
-@mcp.tool()
-def nornir_list_getters(ctx: Context) -> ToolEnvelope:
-    """Lists available NAPALM getters for each platform in the inventory.
-
-    Introspects the NAPALM driver for each unique platform to discover
-    which getters are supported. No device connection is required.
-
-    Returns:
-        A ToolEnvelope whose ``results["server"].data`` is a list of
-        GetterInfo objects, one per platform, each containing the platform
-        name and a sorted list of available getter names. The ``"server"``
-        pseudo-host key is used for non-per-host results (see responses.py).
-    """
-    return ToolEnvelope(
-        operation="nornir_list_getters",
-        request_id=_request_id(ctx),
-        results={"server": HostOutcome(success=True, data=list_getters())},
-    )
 
 
 @mcp.tool()

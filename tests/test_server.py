@@ -127,7 +127,7 @@ def test_request_id_comes_from_context_when_available() -> None:
 
 def test_request_id_falls_back_to_uuid_when_context_has_none() -> None:
     """A ctx without request_id yields a uuid4().hex fallback."""
-    env = server.nornir_list_inventory(SimpleNamespace())  # type: ignore[arg-type]
+    env = server.nornir_list_inventory(SimpleNamespace())
     assert len(env.request_id) == 32
     assert all(c in "0123456789abcdef" for c in env.request_id)
 
@@ -140,7 +140,7 @@ def test_request_id_falls_back_when_context_raises() -> None:
         def request_id(self) -> str:
             raise RuntimeError("no MCP session established")
 
-    env = server.nornir_list_inventory(_SessionlessCtx())  # type: ignore[arg-type]
+    env = server.nornir_list_inventory(_SessionlessCtx())
     assert len(env.request_id) == 32
 
 
@@ -264,7 +264,7 @@ def test_run_getter_normalizes_name_and_option_keys(monkeypatch: pytest.MonkeyPa
         captured["kwargs"] = kwargs
         return {"spine-01": HostOutcome(success=True)}
 
-    monkeypatch.setattr(server, "run_nornir_task", spy)
+    monkeypatch.setattr("nornir_mcp.core.base.run_nornir_task", spy)
 
     env = server.nornir_run_getter(
         _ctx(), getter="arp_table", name="spine-01", getter_options={"keys": ["x"]}

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from nornir_mcp import introspection
+from nornir_mcp.tools.napalm import introspection
 from tests.conftest import FakeHost, FakeHosts, FakeInventory, FakeNornir
 
 
@@ -40,7 +40,9 @@ def _patch_driver(monkeypatch: pytest.MonkeyPatch, driver_cls: type[_BaseStub]) 
     def _factory(_platform: str) -> type[_BaseStub]:
         return driver_cls
 
-    monkeypatch.setattr("nornir_mcp.introspection.napalm.get_network_driver", _factory)
+    monkeypatch.setattr(
+        "nornir_mcp.tools.napalm.introspection.napalm.get_network_driver", _factory
+    )
 
 
 def test_list_getters_excludes_base_class_stubs(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -71,7 +73,7 @@ def test_introspection_failure_populates_error_field(monkeypatch: pytest.MonkeyP
         raise RuntimeError("driver unavailable")
 
     monkeypatch.setattr(introspection, "NetworkDriver", _BaseStub)
-    monkeypatch.setattr("nornir_mcp.introspection.napalm.get_network_driver", _fail)
+    monkeypatch.setattr("nornir_mcp.tools.napalm.introspection.napalm.get_network_driver", _fail)
 
     results = introspection.list_getters()
     assert len(results) == 1
