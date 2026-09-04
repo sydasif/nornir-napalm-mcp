@@ -13,7 +13,6 @@ from pathlib import Path
 
 import pytest
 
-from nornir_mcp import changes
 from nornir_mcp.changes import (
     ChangePlan,
     capture_pre_change_backups,
@@ -154,10 +153,8 @@ def test_pre_change_backup_failure_occurs_before_any_device_write(
     write_calls: list[str] = []
     # Sentinel: the future apply path would use netmiko_send_config; this
     # step must never reach it.
-    # raising=False: the attribute doesn't exist yet (apply arrives step 17).
     monkeypatch.setattr(
-        changes,
-        "netmiko_send_config",
+        "nornir_mcp.tools.netmiko.tool.netmiko_send_config",
         lambda *args: write_calls.append("netmiko_send_config"),
         raising=False,
     )

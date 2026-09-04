@@ -839,7 +839,9 @@ def test_apply_backup_failure_blocks_apply_devices_untouched(
     def failing_backups(plan: object, capture: Any = None, store: Any = None) -> None:
         raise BackupError("pre-change backup failed for 'spine-01' — apply aborted")
 
-    monkeypatch.setattr(server, "capture_pre_change_backups", failing_backups)
+    monkeypatch.setattr(
+        "nornir_mcp.tools.netmiko.tool.capture_pre_change_backups", failing_backups
+    )
     env = server.nornir_apply_config(["interface Ethernet1"], dry_run=False, ctx=_ctx())
     assert env.success is False
     assert env.error is not None
@@ -1013,7 +1015,9 @@ def test_save_config_partial_failure_invariant(
             )
         return FakeTaskResult(result="saved", changed=True)
 
-    monkeypatch.setattr(server, "netmiko_save_config", fake_netmiko_save_config_flaky)
+    import nornir_mcp.tools.netmiko.tool as netmiko_tool_module
+
+    monkeypatch.setattr(netmiko_tool_module, "netmiko_save_config", fake_netmiko_save_config_flaky)
     env = server.nornir_save_config(ctx=_ctx())
     assert env.error is None
     assert env.success is False

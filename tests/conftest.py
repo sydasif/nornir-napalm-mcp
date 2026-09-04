@@ -354,31 +354,31 @@ def fake_netmiko_save_config(
 
 @pytest.fixture
 def netmiko_fakes(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
-    """Monkeypatch fake netmiko tasks into the server namespace.
+    """Monkeypatch fake netmiko tasks into the netmiko tool namespace.
 
-    Replaces the names server.py imports from nornir-netmiko at module
-    level (``netmiko_send_command`` etc.) with the canned fakes above and
-    resets the shared invocation record. Yields the record list so tests
-    can assert what was (or was never) executed.
+    Replaces the names ``nornir_mcp.tools.netmiko.tool`` imports from
+    nornir-netmiko at module level (``netmiko_send_command`` etc.) with the
+    canned fakes above and resets the shared invocation record. Yields the
+    record list so tests can assert what was (or was never) executed.
 
     Object-form monkeypatching is used so the fixture also works before
-    server.py imports these names (attribute-creation, not getattr-check).
+    the module imports these names (attribute-creation, not getattr-check).
     """
-    import nornir_mcp.server as server_module
+    import nornir_mcp.tools.netmiko.tool as netmiko_tool_module
 
     _netmiko_calls.clear()
     netmiko_config_transcripts.clear()
     monkeypatch.setattr(
-        server_module, "netmiko_send_command", fake_netmiko_send_command, raising=False
+        netmiko_tool_module, "netmiko_send_command", fake_netmiko_send_command, raising=False
     )
     monkeypatch.setattr(
-        server_module, "netmiko_send_commands", fake_netmiko_send_commands, raising=False
+        netmiko_tool_module, "netmiko_send_commands", fake_netmiko_send_commands, raising=False
     )
     monkeypatch.setattr(
-        server_module, "netmiko_send_config", fake_netmiko_send_config, raising=False
+        netmiko_tool_module, "netmiko_send_config", fake_netmiko_send_config, raising=False
     )
     monkeypatch.setattr(
-        server_module, "netmiko_save_config", fake_netmiko_save_config, raising=False
+        netmiko_tool_module, "netmiko_save_config", fake_netmiko_save_config, raising=False
     )
     return _netmiko_calls
 
