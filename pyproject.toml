@@ -21,7 +21,7 @@ dependencies = [
 ]
 
 [project.scripts]
-nornir-mcp = "nornir_mcp.main:main"
+nornir-mcp = "nornir_mcp.cli.main:main"
 
 [tool.hatch.version]
 path = "nornir_mcp/__init__.py"

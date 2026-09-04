@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import pytest
 
-from nornir_mcp.errors import DeviceConnectionError
-from nornir_mcp.responses import (
+from nornir_mcp.core.envelope import (
     HostOutcome,
     StructuredError,
     ToolEnvelope,
     maybe_truncate,
     outcome_from_mcp_error,
 )
+from nornir_mcp.core.errors import DeviceConnectionError
 
 
 def _envelope_with(outcomes: dict[str, HostOutcome]) -> ToolEnvelope:

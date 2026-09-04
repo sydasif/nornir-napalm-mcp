@@ -27,7 +27,21 @@ from fastmcp import Client
 
 from nornir_mcp import server
 from nornir_mcp.core import audit, runner, storage
-from tests.test_server import FROZEN_TOOL_NAMES
+
+FROZEN_TOOL_NAMES = {
+    "nornir_list_inventory",
+    "nornir_get_facts",
+    "nornir_run_getter",
+    "nornir_get_config",
+    "nornir_list_getters",
+    "nornir_reload_inventory",
+    "nornir_run_command",
+    "nornir_run_commands",
+    "nornir_backup_config",
+    "nornir_list_backups",
+    "nornir_apply_config",
+    "nornir_save_config",
+}
 
 
 @pytest.fixture(autouse=True)

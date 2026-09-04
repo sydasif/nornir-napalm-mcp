@@ -244,7 +244,7 @@ _TOOLS = (
     netmiko_tools.nornir_save_config,
 )
 
-for _tool in _TOOLS:                      # bound methods: `self` is bound,
+for _tool in _TOOLS:  # bound methods: `self` is bound,
     mcp.tool(name=_tool.__name__)(_tool)  # so the schema has no self param
 ```
 

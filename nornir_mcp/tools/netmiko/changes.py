@@ -29,10 +29,10 @@ from uuid import uuid4
 from pydantic import BaseModel
 
 from nornir_mcp.capability import netmiko_device_type
+from nornir_mcp.core.envelope import HostOutcome, StructuredError, maybe_truncate
+from nornir_mcp.core.policy import PolicyViolation, validate_config_lines
+from nornir_mcp.core.storage import BackupRecord, BackupStore, get_backup_store
 from nornir_mcp.errors import BackupError, UnsupportedOperationError
-from nornir_mcp.policy import PolicyViolation, validate_config_lines
-from nornir_mcp.responses import HostOutcome, StructuredError, maybe_truncate
-from nornir_mcp.storage import BackupRecord, BackupStore, get_backup_store
 from nornir_mcp.tools.base.capture import capture_running_config
 
 # Operation label attached to errors for traceability.

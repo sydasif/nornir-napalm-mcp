@@ -27,10 +27,9 @@ from nornir_mcp.core.errors import (
     UnsupportedOperationError,
     ValidationError,
 )
-from nornir_mcp.core.tasks import netmiko_send_commands
-from nornir_mcp.policy import assert_read_allowed, canonicalize
-from nornir_mcp.runner import execution_lock
-from nornir_mcp.tasks import run_nornir_task
+from nornir_mcp.core.policy import assert_read_allowed, canonicalize
+from nornir_mcp.core.runner import execution_lock
+from nornir_mcp.core.tasks import netmiko_send_commands, run_nornir_task
 from nornir_mcp.tools.netmiko.changes import (
     capture_pre_change_backups,
     dry_run_outcomes,
@@ -542,7 +541,7 @@ class NetmikoTool(CoreBase):
         Successful outcomes become ``data = {"command", "output",
         "truncated", "original_size"}``; failures pass through untouched.
         """
-        from nornir_mcp.responses import maybe_truncate
+        from nornir_mcp.core.envelope import maybe_truncate
 
         wrapped: dict[str, HostOutcome] = {}
         for hostname, outcome in outcomes.items():
@@ -565,6 +564,6 @@ class NetmikoTool(CoreBase):
     @staticmethod
     def _maybe_truncate(text: str) -> tuple[str, bool, int]:
         """Truncate *text* to the configured byte budget."""
-        from nornir_mcp.responses import maybe_truncate
+        from nornir_mcp.core.envelope import maybe_truncate
 
         return maybe_truncate(text)

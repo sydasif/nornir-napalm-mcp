@@ -2,6 +2,6 @@
 
 from __future__ import annotations
 
-from nornir_mcp.main import main
+from nornir_mcp.cli.main import main
 
 main()

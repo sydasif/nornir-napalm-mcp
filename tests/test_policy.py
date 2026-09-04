@@ -12,8 +12,8 @@ from pathlib import Path
 
 import pytest
 
-from nornir_mcp.errors import CommandRejectedError, ValidationError
-from nornir_mcp.policy import (
+from nornir_mcp.core.errors import CommandRejectedError, ValidationError
+from nornir_mcp.core.policy import (
     MAX_COMMAND_LENGTH,
     CommandCategory,
     PolicyViolation,

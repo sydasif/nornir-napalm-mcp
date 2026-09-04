@@ -13,15 +13,15 @@ from pathlib import Path
 
 import pytest
 
-from nornir_mcp.changes import (
+from nornir_mcp.core.errors import BackupError, DeviceConnectionError
+from nornir_mcp.core.storage import FilesystemBackupStore
+from nornir_mcp.tools.netmiko.changes import (
     ChangePlan,
     capture_pre_change_backups,
     dry_run_outcomes,
     parse_config_transcript,
     plan_change,
 )
-from nornir_mcp.errors import BackupError, DeviceConnectionError
-from nornir_mcp.storage import FilesystemBackupStore
 
 
 def test_plan_change_collects_per_host_violations() -> None:
