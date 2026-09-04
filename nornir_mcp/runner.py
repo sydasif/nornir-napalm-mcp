@@ -43,7 +43,7 @@ class NornirLike(Protocol):
     def filter(  # noqa: A003 - matches Nornir's API name
         self,
         *,
-        filter_func: Any = None,
+        filter_func: Any = None,  # noqa: ARG002
         platform: str | None = None,
     ) -> NornirLike:
         """Return a new instance containing only matching devices.

@@ -54,7 +54,7 @@ def test_list_inventory_empty(monkeypatch: pytest.MonkeyPatch) -> None:
 
         return FakeNornir(FakeInventory(FakeHosts({})))
 
-    monkeypatch.setattr("nornir_napalm_mcp.runner.InitNornir", mock_init)
+    monkeypatch.setattr("nornir_mcp.runner.InitNornir", mock_init)
     runner.reset_nornir()
     devices = server.nornir_list_inventory()
     assert devices == []
@@ -189,7 +189,7 @@ def test_list_getters_unknown_platform_returns_empty(monkeypatch: pytest.MonkeyP
     def mock_init(**_: object) -> FakeNornir:
         return FakeNornir(FakeInventory(FakeHosts(hosts_data)))
 
-    monkeypatch.setattr("nornir_napalm_mcp.runner.InitNornir", mock_init)
+    monkeypatch.setattr("nornir_mcp.runner.InitNornir", mock_init)
     runner.reset_nornir()
     results = server.nornir_list_getters()
     assert len(results) == 1

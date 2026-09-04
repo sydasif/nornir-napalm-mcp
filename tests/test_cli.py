@@ -85,7 +85,7 @@ def test_main_module_delegates_to_main(
     monkeypatch.setattr(main_module, "main", lambda: called.append(True))
 
     # Force reimport so __main__ executes its module-level main() call
-    mod_name = "nornir_napalm_mcp.__main__"
+    mod_name = "nornir_mcp.__main__"
     sys.modules.pop(mod_name, None)
     importlib.import_module(mod_name)
 

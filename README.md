@@ -96,7 +96,7 @@ Register this server with any MCP client (Claude Desktop, VS Code, etc.) by addi
       "command": "uvx",
       "args": [
         "--from",
-        "git+https://github.com/sydasif/nornir-mcp",
+        "git+https://github.com/sydasif/nornir-napalm-mcp",
         "nornir-mcp"
       ],
       "env": {
