@@ -6,13 +6,14 @@
   <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/Python-3.12+-3776AB.svg?logo=python&logoColor=white" alt="Python 3.12+"></a>
   <a href="https://nornir.readthedocs.io/"><img src="https://img.shields.io/badge/Nornir-3.4+-FF6B35.svg" alt="Nornir 3.4+"></a>
   <a href="https://napalm.readthedocs.io/"><img src="https://img.shields.io/badge/NAPALM-5.0+-2ECC71.svg" alt="NAPALM 5.0+"></a>
+  <a href="https://github.com/ktbyers/netmiko"><img src="https://img.shields.io/badge/Netmiko-4.7+-3498DB.svg" alt="Netmiko 4.7+"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-green.svg" alt="License: MIT"></a>
   <a href="https://github.com/sydasif/nornir-napalm-mcp"><img src="https://img.shields.io/badge/code%20style-ruff-black" alt="Code style: ruff"></a>
 </p>
 
-# Nornir-NAPALM FastMCP Server
+# Nornir-NAPALM-Netmiko FastMCP Server
 
-A FastMCP server that exposes live network device state to AI assistants via NAPALM getters and CLI commands. Nornir handles inventory loading and concurrent device connections over SSH, eAPI, and NETCONF.
+A FastMCP server that exposes live network device state to AI assistants via NAPALM getters and netmiko CLI commands. Nornir handles inventory loading and concurrent device connections; NAPALM drives the read/getter tools and netmiko drives the CLI read + write-path tools.
 
 Reads are free; **writes are gated**. `nornir_apply_config` (dry-run by default) and `nornir_save_config` are the only tools that touch device state, and every write is policy-screened, pre-change-backed up (fail-closed), transcript-parsed, and audit-logged. Every response is a structured envelope with an explicit success flag (spec §21).
 
@@ -32,12 +33,12 @@ Reads are free; **writes are gated**. `nornir_apply_config` (dry-run by default)
 | `nornir_get_config`       | Retrieve running and/or startup configuration from a device                 |
 | `nornir_list_getters`     | Introspect available NAPALM getters for each platform in the inventory      |
 | `nornir_reload_inventory` | Re-read YAML inventory from disk                                            |
-| `nornir_run_command`      | Run one read-only CLI command (READ_ONLY/SAFE_OPERATIONAL only, per device)  |
-| `nornir_run_commands`     | Run a batch of read-only CLI commands; rejected commands fail only themselves |
-| `nornir_backup_config`    | Capture and store the running config as an immutable backup (rollback substrate) |
+| `nornir_run_command`      | Run one read-only netmiko CLI command (READ_ONLY/SAFE_OPERATIONAL only, per device)  |
+| `nornir_run_commands`     | Run a batch of read-only netmiko CLI commands; rejected commands fail only themselves |
+| `nornir_backup_config`    | Capture and store the running config as an immutable backup (NAPALM, falling back to netmiko) |
 | `nornir_list_backups`     | List stored backups for a device, oldest first                              |
-| `nornir_apply_config`     | Plan (dry-run by default) and apply config lines; pre-change backups are mandatory and fail-closed |
-| `nornir_save_config`      | Persist running config to startup/NVRAM — explicit-only, never called implicitly by apply (spec §11) |
+| `nornir_apply_config`     | Plan (dry-run by default) and apply config lines via netmiko; pre-change backups are mandatory and fail-closed |
+| `nornir_save_config`      | Persist running config to startup/NVRAM via netmiko — explicit-only, never called implicitly by apply (spec §11) |
 
 - **Writes are gated.** `nornir_apply_config` and `nornir_save_config` are the only write tools. Apply dry-runs by default, rejects DANGEROUS/BLOCKED lines per device, always captures a pre-change backup (fail-closed: a failed backup means the device is never touched), and reports transcript errors honestly. Saving to NVRAM is a separate, explicit, audited step.
 - **Lazy initialization** — server starts even with a broken inventory, exposing the tool catalogue for inspection.
@@ -47,7 +48,7 @@ Reads are free; **writes are gated**. `nornir_apply_config` (dry-run by default)
 
 ## Safety model
 
-Every command is classified into one of six categories per platform (`ios` / `eos` rulesets — anything else defaults to UNKNOWN and is denied):
+Every CLI command routed through netmiko is classified into one of six categories per platform (`ios` / `eos` rulesets — anything else defaults to UNKNOWN and is denied):
 
 | Category | Read tools (`nornir_run_command*`) | Apply (`nornir_apply_config`) |
 | -------- | --------------------------------- | ----------------------------- |
