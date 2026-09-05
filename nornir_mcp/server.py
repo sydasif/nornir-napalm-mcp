@@ -11,12 +11,14 @@ from typing import Any
 
 from fastmcp import FastMCP
 
+from nornir_mcp import __version__
 from nornir_mcp.tools.base.tool import NornirBase
 from nornir_mcp.tools.napalm.tool import NapalmTool
 from nornir_mcp.tools.netmiko.tool import NetmikoTool
 
 mcp = FastMCP(
     name="Nornir-NAPALM Server",
+    version=__version__,
     instructions="Query network devices via NAPALM. Call nornir_list_inventory first.",
 )
 
