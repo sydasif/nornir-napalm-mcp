@@ -11,12 +11,12 @@ from typing import Any
 
 import pytest
 
-from nornir_mcp.capability import (
+from nornir_mcp.core.capability import (
     NETMIKO_DEVICE_TYPES,
     netmiko_device_type,
     supports_cli,
 )
-from nornir_mcp.errors import UnsupportedOperationError
+from nornir_mcp.core.errors import UnsupportedOperationError
 from tests.conftest import (
     FakeHost,
     FakeHosts,

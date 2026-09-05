@@ -6,7 +6,7 @@ import getpass
 import json
 from pathlib import Path
 
-from nornir_mcp.audit import AuditLogger
+from nornir_mcp.core.audit import AuditLogger
 
 
 def _logger(tmp_path: Path) -> AuditLogger:

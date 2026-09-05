@@ -42,7 +42,7 @@ _ENV_MAX_OUTPUT_BYTES = "NORNIR_MCP_MAX_OUTPUT_BYTES"
 class StructuredError(BaseModel):
     """A request- or host-level error payload (spec §22 shape).
 
-    ``type`` is a string from the :class:`nornir_mcp.errors.ErrorType`
+    ``type`` is a string from the :class:`nornir_mcp.core.errors.ErrorType`
     catalog; ``retryable`` follows the spec §23 policy.
     """
 

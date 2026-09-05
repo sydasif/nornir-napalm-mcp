@@ -1,4 +1,4 @@
-"""Tests for nornir_mcp.errors — categorized errors and retry policy.
+"""Tests for nornir_mcp.core.errors — categorized errors and retry policy.
 
 Spec §22 requires every tool-facing failure to carry a categorized error
 type, message, target device, operation, and retryable flag. Spec §23
@@ -12,8 +12,8 @@ from pathlib import Path
 
 import pytest
 
-from nornir_mcp import errors
-from nornir_mcp.errors import (
+from nornir_mcp.core import errors
+from nornir_mcp.core.errors import (
     BackupError,
     CommandRejectedError,
     ConfigurationError,

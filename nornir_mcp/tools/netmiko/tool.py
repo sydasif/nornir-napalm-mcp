@@ -12,9 +12,9 @@ from nornir_netmiko.tasks import (
     netmiko_send_config,
 )
 
-from nornir_mcp.audit import get_audit_logger
-from nornir_mcp.capability import netmiko_device_type
+from nornir_mcp.core.audit import get_audit_logger
 from nornir_mcp.core.base import CoreBase
+from nornir_mcp.core.capability import netmiko_device_type
 from nornir_mcp.core.envelope import (
     HostOutcome,
     StructuredError,

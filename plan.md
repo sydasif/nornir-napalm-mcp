@@ -371,42 +371,42 @@ The redesign lands in dependency order: core first, then the class packages,
 then the composition root and test rewrite, then deletion of legacy files.
 Phases may be committed separately; each must end with the full suite green.
 
-- [ ] **Phase 0 — baseline.** `uv run pytest`, `uv run ruff check .`,
+- [x] **Phase 0 — baseline.** `uv run pytest`, `uv run ruff check .`,
   `uv run mypy .` all green; commit the current state as the reference point.
-- [ ] **Phase 1 — core kernel.** Create `core/`; move `runner.py`, `tasks.py`,
+- [x] **Phase 1 — core kernel.** Create `core/`; move `runner.py`, `tasks.py`,
   `policy.py`, `capability.py`, `storage.py`, `audit.py`, `errors.py`,
   `responses.py`→`envelope.py` and their tests. Keep `nornir_mcp` root modules
   as thin re-export shims (`from nornir_mcp.core.xxx import *`) so server.py
   and remaining tests import unchanged. Green.
-- [ ] **Phase 2 — `tools/base` package.** Move `InventoryDevice` into `tool.py`
+- [x] **Phase 2 — `tools/base` package.** Move `InventoryDevice` into `tool.py`
   (delete `models.py`); extract `capture.py` from `changes.py` (leave
   `changes.py` re-exporting `capture_running_config` for now); define
   `NornirBase(CoreBase)` in `tool.py` with the 4 server tools, moving bodies
   verbatim (docstrings/signatures intact); root `server.py` re-exports the
   tool names so direct-call tests still pass. Green.
-- [ ] **Phase 3 — `tools/napalm` package.** `NapalmTool`; move
+- [x] **Phase 3 — `tools/napalm` package.** `NapalmTool`; move
   `introspection.py` (with `GetterInfo` folded in, delete `models.py`); move
   the `napalm_get` import out of server.py. Update the `run_nornir_task` spy
   anchor (§6.1) and re-export from server.py. Green.
-- [ ] **Phase 4 — `tools/netmiko` package.** `NetmikoTool` with helpers 5–8 as
+- [x] **Phase 4 — `tools/netmiko` package.** `NetmikoTool` with helpers 5–8 as
   private methods and `netmiko_send_commands` folded into `tool.py`;
   `changes.py` keeps `ChangePlan`; drop `core/tasks.py`'s netmiko wrapper;
   retarget the `netmiko_fakes` fixture and the apply/save anchors (§6.1);
   `server.py` imports of netmiko plugin tasks no longer exist — verify
   nothing stale is patched. Green (full suite — this phase surfaces any
   missed anchor).
-- [ ] **Phase 5 — composition root & test rewrite.** Slim `server.py` to §3.5
+- [x] **Phase 5 — composition root & test rewrite.** Slim `server.py` to §3.5
   (registration loop, no tool re-exports); split `tests/test_server.py` into
   the §6 tree; rewrite direct calls to the `server` singletons; move the tool-
   surface pin test to `tests/test_e2e.py` (wire-level); move `main.py` →
   `cli/main.py` and update pyproject `[project.scripts]` + `__main__.py`.
   Green.
-- [ ] **Phase 6 — delete legacy shims; docs.** Remove root re-export shims
+- [x] **Phase 6 — delete legacy shims; docs.** Remove root re-export shims
   (`nornir_mcp/responses.py`, `changes.py`, `models.py`, `introspection.py`,
   `main.py` stubs). Update `CLAUDE.md` (architecture, testing approach,
   netmiko_fakes targets, tool-definition location, dev commands if they
   changed) and `README.md`.
-- [ ] **Final gates.** `uv run pytest`, `uv run ruff check .`,
+- [x] **Final gates.** `uv run pytest`, `uv run ruff check .`,
   `uv run ruff format --check .`, `uv run mypy .`,
   `uv run vulture nornir_mcp tests --min-confidence 80`,
   `uv run pytest --cov=nornir_mcp --cov-branch`. Confirm the 12-tool surface

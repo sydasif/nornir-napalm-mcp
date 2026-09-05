@@ -8,7 +8,7 @@ changes are reconstructable after the fact.
 §22 forbid device config text in MCP responses and logs. Callers must pass
 only hashes/sizes (or other non-sensitive metadata) via ``details`` — the
 raw config that was applied lives only in the immutable backups written by
-:mod:`nornir_mcp.storage`.
+:mod:`nornir_mcp.core.storage`.
 
 Identity is ``getpass.getuser()`` per D9: stdio MCP has no strong
 authenticated user, so the local OS username is a weak best-effort marker

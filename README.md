@@ -16,6 +16,10 @@ A FastMCP server that exposes live network device state to AI assistants via NAP
 
 Reads are free; **writes are gated**. `nornir_apply_config` (dry-run by default) and `nornir_save_config` are the only tools that touch device state, and every write is policy-screened, pre-change-backed up (fail-closed), transcript-parsed, and audit-logged. Every response is a structured envelope with an explicit success flag (spec §21).
 
+> **Developers and AI agents**: architecture, invariants, testing anchors, and
+> verification gates live in [`CLAUDE.md`](CLAUDE.md). This README is the
+> user-facing reference: features, setup, usage, and the dev workflow.
+
 ---
 
 ## Features
@@ -202,34 +206,40 @@ NORNIR_CONFIG=/path/to/config.yaml uv run python -m nornir_mcp
 nornir-mcp/
 ├── nornir_mcp/
 │   ├── __init__.py       # Package version
-│   ├── __main__.py       # python -m support
-│   ├── main.py           # CLI entry point (argparse, transport selection)
-│   ├── models.py         # Pydantic data models (InventoryDevice, GetterInfo)
-│   ├── errors.py         # Categorized exceptions (McpError, ErrorType) with retryable policy
-│   ├── responses.py      # ToolEnvelope / HostOutcome response models and truncation
-│   ├── policy.py         # Command canonicalization + classification (READ/SAFE/CONFIG/DANGEROUS/BLOCKED/UNKNOWN)
-│   ├── capability.py     # Platform capability gate (netmiko device-type mapping)
-│   ├── storage.py        # Immutable backup storage (0600 files, sha256 sidecars, traversal-safe)
-│   ├── audit.py          # Append-only JSONL audit logger (hashes only, never config text)
-│   ├── changes.py        # Write-path orchestration: capture, plan, fail-closed backups, dry-run, transcript parse
-│   ├── runner.py         # Nornir init, config loading, singleton caching, execution lock, NornirLike protocol
-│   ├── tasks.py          # Task helpers: device filtering, execution, outcome normalization
-│   ├── introspection.py  # NAPALM getter discovery per platform
-│   ├── server.py         # FastMCP server instance and the 12 tool definitions
+│   ├── __main__.py       # python -m nornir_mcp support
+│   ├── server.py         # Composition root: FastMCP + tool registration (thin)
+│   ├── cli/
+│   │   └── main.py       # CLI entry point (argparse, transport selection)
+│   ├── core/             # Shared kernel — stateless services + CoreBase
+│   │   ├── base.py       # CoreBase: envelope/selection plumbing shared by all tools
+│   │   ├── envelope.py   # ToolEnvelope / HostOutcome / StructuredError + truncation
+│   │   ├── errors.py     # Categorized exceptions (McpError, ErrorType) with retryable policy
+│   │   ├── policy.py     # Command canonicalization + classification (READ/SAFE/CONFIG/DANGEROUS/BLOCKED/UNKNOWN)
+│   │   ├── capability.py # Platform capability gate (netmiko device-type mapping)
+│   │   ├── storage.py    # Immutable backup storage (0600 files, sha256 sidecars, traversal-safe)
+│   │   ├── audit.py      # Append-only JSONL audit logger (hashes only, never config text)
+│   │   ├── runner.py     # Nornir init, config loading, singleton caching, execution lock, NornirLike protocol
+│   │   └── tasks.py      # Task helpers: device filtering, execution, outcome normalization
+│   ├── tools/
+│   │   ├── base/         # NornirBase: engine-agnostic server tools (inventory, reload, backups)
+│   │   │   ├── tool.py   # NornirBase(CoreBase) — 4 server tools + InventoryDevice model
+│   │   │   └── capture.py # Config-capture service (NAPALM preferred, netmiko fallback)
+│   │   ├── napalm/       # NapalmTool: NAPALM-family tools
+│   │   │   ├── tool.py   # NapalmTool(NornirBase) — 4 NAPALM tools
+│   │   │   └── introspection.py # NAPALM getter discovery per platform (GetterInfo)
+│   │   └── netmiko/      # NetmikoTool: CLI read + write-path tools
+│   │       ├── tool.py   # NetmikoTool(NornirBase) — 4 CLI tools + gating
+│   │       └── changes.py # Write-path orchestration: plan, fail-closed backups, dry-run, transcript parse
 │   └── py.typed          # PEP 561 marker for downstream type checking
 ├── tests/
 │   ├── conftest.py       # Fake Nornir stubs, fake netmiko tasks, pytest fixtures
-│   ├── test_server.py    # Unit tests for the 12 MCP tools, envelope contract, tool-surface pin
-│   ├── test_policy.py    # Canonicalization, classification, config-line gating
-│   ├── test_capability.py# Capability gate + netmiko fakes
-│   ├── test_storage.py   # Immutable backup storage
-│   ├── test_audit.py     # Audit logger
-│   ├── test_tasks.py     # Device filtering and task execution
-│   ├── test_runner.py    # Config loading and path expansion
-│   ├── test_locking.py   # Global execution lock
-│   ├── test_changes.py   # Planning, pre-change backups, dry-run, transcript parsing
-│   ├── test_e2e.py       # Full-stack tests through the MCP protocol layer
-│   ├── test_cli.py       # CLI entry points
+│   ├── core/             # Kernel unit tests (envelope, errors, policy, capability, storage, audit, tasks, runner, locking)
+│   ├── tools/
+│   │   ├── base/test_tool.py       # NornirBase tools (inventory, reload, backups)
+│   │   ├── napalm/                 # NapalmTool tools + getter introspection
+│   │   └── netmiko/               # NetmikoTool tools + change planning / transcript parsing
+│   ├── test_e2e.py       # Full-stack tests through the MCP protocol layer + 12-tool surface pin
+│   └── test_cli.py       # CLI entry points
 ├── config.example.yaml   # Example Nornir configuration
 ├── pyproject.toml        # Build config, dependencies, and tool settings
 ├── uv.lock               # Locked dependencies
@@ -246,6 +256,15 @@ nornir-mcp/
 # Install dependencies
 uv sync
 
+# Add a dependency (or dev dependency)
+uv add <package>
+uv add --dev <package>
+
+# Update the lockfile
+uv lock
+```
+
+```bash
 # Run tests
 uv run pytest
 
@@ -254,15 +273,31 @@ uv run pytest --cov=nornir_mcp --cov-branch
 
 # Lint
 uv run ruff check .
-
-# Auto-fix lint issues
 uv run ruff check --fix .
 
 # Format
 uv run ruff format .
+uv run ruff format --check .
 
 # Type check (strict mode)
 uv run mypy .
+
+# Dead code scan
+uv run vulture nornir_mcp tests --min-confidence 80
+```
+
+```bash
+# Local dev (MCP Inspector)
+fastmcp dev nornir_mcp/server.py
+
+# Claude Desktop install
+fastmcp install nornir_mcp/server.py
+
+# Run STDIO transport
+nornir-mcp --transport stdio
+
+# Run HTTP transport
+nornir-mcp --transport http --host 0.0.0.0 --port 8000
 ```
 
 ### Code standards
