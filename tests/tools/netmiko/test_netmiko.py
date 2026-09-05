@@ -20,6 +20,7 @@ from tests.conftest import (
     FakeInventory,
     FakeNornir,
     FakeTaskResult,
+    NetmikoTaskShim,
     netmiko_config_transcripts,
 )
 
@@ -174,6 +175,36 @@ def test_run_command_mixed_hosts_partial_success_preserved(
     assert env.results["mx-01"].error is not None
     assert env.results["mx-01"].error.type == "unsupported_operation"
     assert [call["host"] for call in netmiko_fakes] == ["spine-01"]
+
+
+# ---------------------------------------------------------------------------
+# netmiko_send_commands — real task return-shape contract
+# ---------------------------------------------------------------------------
+
+
+def test_netmiko_send_commands_returns_per_command_map(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The real task returns ``{command: output}``, never ``{host: {command: output}}``.
+
+    This pins the shape the empty-output-on-real-devices regression (2d28511)
+    broke: a result wrapped as ``{host.name: {command: output}}`` is not
+    keyed by command, so every downstream ``data.get(command)`` misses and
+    the tool returns empty output. The fake substitutes only the inner
+    ``netmiko_send_command``, so the test exercises the real wrapper logic.
+    """
+
+    def fake_send(task: Any, command_string: str = "", **kwargs: Any) -> FakeTaskResult:
+        return FakeTaskResult(result=f"out[{command_string}]")
+
+    monkeypatch.setattr("nornir_mcp.tools.netmiko.tool.netmiko_send_command", fake_send)
+    from nornir_mcp.tools.netmiko.tool import netmiko_send_commands
+
+    task = NetmikoTaskShim(
+        FakeHost(name="spine-01", hostname="10.0.0.1", platform="ios", groups=[])
+    )
+    result = netmiko_send_commands(task, commands=["show ver", "show ip int br"])
+    assert result.result == {"show ver": "out[show ver]", "show ip int br": "out[show ip int br]"}
+    # Regression guard: hostname must NOT leak into the result as a wrapper key.
+    assert "spine-01" not in result.result
 
 
 # ---------------------------------------------------------------------------

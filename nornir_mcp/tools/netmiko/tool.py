@@ -19,6 +19,7 @@ from nornir_mcp.core.envelope import (
     HostOutcome,
     StructuredError,
     ToolEnvelope,
+    maybe_truncate,
     outcome_from_mcp_error,
 )
 from nornir_mcp.core.errors import (
@@ -44,8 +45,8 @@ def netmiko_send_commands(task: Any, commands: list[str] | None = None, **kwargs
 
     nornir-netmiko 1.0.x no longer ships a batch plugin, so this in-house
     task replicates the classic plugin semantics: each command is sent via
-    ``netmiko_send_command`` and collected into ``{hostname: {command:
-    output}}``. Tests replace the module-level name with the canned
+    ``netmiko_send_command`` and collected into ``{command: output}``.
+    Tests replace the module-level name with the canned
     ``fake_netmiko_send_commands`` (see conftest), which records exactly
     which commands were sent.
 
@@ -54,8 +55,8 @@ def netmiko_send_commands(task: Any, commands: list[str] | None = None, **kwargs
         commands: The commands to run, in order.
 
     Returns:
-        A Nornir ``Result`` whose ``result`` maps the hostname to a
-        per-command output dict.
+        A Nornir ``Result`` whose ``result`` maps each command to its
+        output for the host the task ran against.
     """
     outputs: dict[str, str] = {}
     for command in commands or []:
@@ -551,7 +552,7 @@ class NetmikoTool(NornirBase):
         for command in commands:
             raw = data.get(command)
             text = raw if isinstance(raw, str) else str(raw or "")
-            truncated, flagged, original_size = self._maybe_truncate(text)
+            truncated, flagged, original_size = maybe_truncate(text)
             outputs[command] = {
                 "output": truncated,
                 "truncated": flagged,
@@ -567,7 +568,6 @@ class NetmikoTool(NornirBase):
         Successful outcomes become ``data = {"command", "output",
         "truncated", "original_size"}``; failures pass through untouched.
         """
-        from nornir_mcp.core.envelope import maybe_truncate
 
         wrapped: dict[str, HostOutcome] = {}
         for hostname, outcome in outcomes.items():
@@ -586,10 +586,3 @@ class NetmikoTool(NornirBase):
                 },
             )
         return wrapped
-
-    @staticmethod
-    def _maybe_truncate(text: str) -> tuple[str, bool, int]:
-        """Truncate *text* to the configured byte budget."""
-        from nornir_mcp.core.envelope import maybe_truncate
-
-        return maybe_truncate(text)

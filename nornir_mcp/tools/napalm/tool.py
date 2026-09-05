@@ -7,7 +7,7 @@ from typing import Any, Literal
 from fastmcp import Context
 from nornir_napalm.plugins.tasks import napalm_get
 
-from nornir_mcp.core.envelope import ToolEnvelope
+from nornir_mcp.core.envelope import HostOutcome, ToolEnvelope
 from nornir_mcp.tools.base.tool import NornirBase
 from nornir_mcp.tools.napalm.introspection import list_getters
 
@@ -163,12 +163,5 @@ class NapalmTool(NornirBase):
         return ToolEnvelope(
             operation="nornir_list_getters",
             request_id=self._request_id(ctx),
-            results={"server": self._list_getters_outcome()},
+            results={"server": HostOutcome(success=True, data=list_getters())},
         )
-
-    @staticmethod
-    def _list_getters_outcome() -> Any:
-        """Return the server-side outcome for list_getters."""
-        from nornir_mcp.core.envelope import HostOutcome
-
-        return HostOutcome(success=True, data=list_getters())

@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict
 from nornir_mcp.core.audit import get_audit_logger
 from nornir_mcp.core.base import CoreBase
 from nornir_mcp.core.envelope import HostOutcome, ToolEnvelope, outcome_from_mcp_error
-from nornir_mcp.core.errors import InternalError, McpError
+from nornir_mcp.core.errors import InternalError, McpError, ValidationError
 from nornir_mcp.core.runner import get_nornir, reset_nornir
 from nornir_mcp.core.storage import get_backup_store
 from nornir_mcp.tools.base.capture import capture_running_config
@@ -168,7 +168,6 @@ class NornirBase(CoreBase):
         """
         operation = "nornir_list_backups"
         request_id = self._request_id(ctx)
-        from nornir_mcp.core.errors import ValidationError
 
         try:
             records = get_backup_store().list(host)
