@@ -135,9 +135,7 @@ class NornirBase(CoreBase):
                 )
 
         successes = sum(1 for o in outcomes.values() if o.success)
-        if not outcomes:
-            result = "no_hosts"
-        elif successes == len(outcomes):
+        if successes == len(outcomes):
             result = "success"
         elif successes == 0:
             result = "failed"
@@ -155,8 +153,8 @@ class NornirBase(CoreBase):
     def nornir_list_backups(self, host: str, ctx: Context | None = None) -> ToolEnvelope:
         """Lists the stored backups for one device, oldest first.
 
-        These backups are the rollback substrate for nornir_apply_config
-        (arriving with the apply path). Host names are validated against path
+        These backups are the rollback substrate for nornir_apply_config's
+        mandatory pre-change captures. Host names are validated against path
         traversal before any filesystem access.
 
         Args:

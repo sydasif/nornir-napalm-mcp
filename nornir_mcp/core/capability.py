@@ -39,8 +39,3 @@ def netmiko_device_type(platform: str) -> str:
             f"Supported platforms: {supported}."
         )
     return device_type
-
-
-def supports_cli(platform: str) -> bool:
-    """True if *platform* has a netmiko device_type mapping."""
-    return platform in NETMIKO_DEVICE_TYPES

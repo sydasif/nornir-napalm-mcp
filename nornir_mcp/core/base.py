@@ -16,6 +16,7 @@ instance silently bypass the global lock/cache (spec D7).
 
 from __future__ import annotations
 
+import uuid
 from typing import Any
 
 from fastmcp import Context
@@ -44,8 +45,6 @@ class CoreBase:
         direct invocation), which is treated as "not available"; in that case a
         fresh ``uuid4().hex`` is used.
         """
-        import uuid
-
         try:
             request_id: str | None = ctx.request_id if ctx is not None else None
         except (RuntimeError, AttributeError):

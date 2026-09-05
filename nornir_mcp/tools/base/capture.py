@@ -1,6 +1,6 @@
 """Config-capture service: shared by NornirBase.backup and NetmikoTool apply path.
 
-:nfunc:`capture_running_config` reads one device's running configuration and
+:func:`capture_running_config` reads one device's running configuration and
 returns it as text. NAPALM is preferred; platforms without a NAPALM driver
 fall back to netmiko's ``show running-config``. Failures raise
 :exc:`McpError` subclasses and propagate to the caller.
@@ -8,12 +8,11 @@ fall back to netmiko's ``show running-config``. Failures raise
 
 from __future__ import annotations
 
-from typing import Any
-
 import napalm
 from nornir_napalm.plugins.tasks import napalm_get
 from nornir_netmiko.tasks import netmiko_send_command
 
+from nornir_mcp.core.envelope import StructuredError
 from nornir_mcp.core.errors import DeviceConnectionError, InternalError
 from nornir_mcp.core.tasks import run_nornir_task
 
@@ -45,6 +44,7 @@ def capture_running_config(host: str, platform: str, ctx_request_id: str) -> str
 
 
 def _capture_via_napalm(host: str, ctx_request_id: str) -> str:
+    """Capture the running config via the NAPALM ``config`` getter."""
     outcomes = run_nornir_task(
         napalm_get,
         operation=_CAPTURE_OPERATION,
@@ -62,7 +62,7 @@ def _capture_via_napalm(host: str, ctx_request_id: str) -> str:
     if not outcome.success:
         _raise_capture_error(outcome.error, host, ctx_request_id)
     data = outcome.data if isinstance(outcome.data, dict) else {}
-    config = data.get("config") if isinstance(data, dict) else None
+    config = data.get("config")
     running = config.get("running") if isinstance(config, dict) else None
     if not isinstance(running, str):
         raise InternalError(
@@ -74,6 +74,7 @@ def _capture_via_napalm(host: str, ctx_request_id: str) -> str:
 
 
 def _capture_via_netmiko(host: str, ctx_request_id: str) -> str:
+    """Capture the running config via a netmiko ``show running-config``."""
     outcomes = run_nornir_task(
         netmiko_send_command,
         operation=_CAPTURE_OPERATION,
@@ -92,14 +93,10 @@ def _capture_via_netmiko(host: str, ctx_request_id: str) -> str:
     return outcome.data if isinstance(outcome.data, str) else str(outcome.data or "")
 
 
-def _raise_capture_error(error: Any, host: str, ctx_request_id: str) -> None:
+def _raise_capture_error(error: StructuredError | None, host: str, ctx_request_id: str) -> None:
     """Convert a structured host failure into a categorized McpError."""
-    message = (
-        error.message
-        if error is not None and hasattr(error, "message")
-        else "config capture failed"
-    )
-    if error is not None and getattr(error, "type", None) == "connection":
+    message = error.message if error is not None else "config capture failed"
+    if error is not None and error.type == "connection":
         raise DeviceConnectionError(message, host=host, operation=_CAPTURE_OPERATION)
     raise InternalError(
         f"{message} (request {ctx_request_id})", host=host, operation=_CAPTURE_OPERATION

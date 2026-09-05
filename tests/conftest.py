@@ -139,28 +139,6 @@ class FakeNornir:
                 for host in hosts.values()
             }
 
-        # Config / change tasks: return a diff-bearing payload.
-        # Mirror nornir-napalm semantics for the flags the tools surface:
-        #   * napalm_configure sets changed = (diff is non-empty) *before* the
-        #     dry_run commit/discard check, so changed is independent of dry_run.
-        #   * napalm_rollback / napalm_confirm_commit set changed only when the
-        #     action is actually taken (dry_run=False).
-        if task_name in ("napalm_configure", "napalm_rollback", "napalm_confirm_commit"):
-            dry_run = kwargs.get("dry_run", True)
-            result_str = (
-                "Rollback completed"
-                if task_name == "napalm_rollback" and not dry_run
-                else "Commit confirm completed"
-                if task_name == "napalm_confirm_commit" and not dry_run
-                else ""
-            )
-            changed = bool(result_str) or (task_name == "napalm_configure")
-            payload = FakeTaskResult(
-                result=result_str,
-                changed=changed,
-            )
-            return {name: FakeHostResult([payload]) for name in hosts}
-
         # Dispatch based on which kwargs are present.
         # Mirror nornir-napalm napalm_get semantics: the result is keyed by
         # the getter name as passed, while the device method is looked up
@@ -198,19 +176,6 @@ class FakeNornir:
             commands: list[str] = kwargs["commands"]
             result = {cmd: f"Output for: {cmd}" for cmd in commands}
             return {name: FakeHostResult([FakeTaskResult(result)]) for name in hosts}
-
-        if "getters" in kwargs or "dest" in kwargs:
-            # napalm_ping and similar tasks return ping/compliance data
-            return {
-                name: FakeHostResult([FakeTaskResult(result={"success": True})]) for name in hosts
-            }
-
-        if "src" in kwargs or "validation_source" in kwargs:
-            # napalm_validate returns compliance dict with result/complies keys
-            return {
-                name: FakeHostResult([FakeTaskResult(result={"result": {}, "complies": True})])
-                for name in hosts
-            }
 
         # Unrecognized task: fail loudly so new task types must be added explicitly
         raise NotImplementedError(

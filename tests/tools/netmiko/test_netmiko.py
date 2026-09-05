@@ -33,7 +33,7 @@ def _ctx() -> Any:
 
 
 @pytest.fixture(autouse=True)
-def _reload_server(request: pytest.FixtureRequest) -> Generator[None, None, None]:
+def _reload_server(request: pytest.FixtureRequest) -> Generator[None]:
     """Reset runner's cached Nornir singleton before each test."""
     request.getfixturevalue("fake_nornir")
     runner.reset_nornir()
@@ -42,9 +42,7 @@ def _reload_server(request: pytest.FixtureRequest) -> Generator[None, None, None
 
 
 @pytest.fixture(autouse=True)
-def _isolated_backup_audit(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> Generator[None, None, None]:
+def _isolated_backup_audit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Generator[None]:
     """Point backup/audit storage at tmp dirs and reset their singletons."""
     monkeypatch.setenv("NORNIR_MCP_BACKUP_DIR", str(tmp_path / "backups"))
     monkeypatch.setenv("NORNIR_MCP_AUDIT_DIR", str(tmp_path / "audit"))

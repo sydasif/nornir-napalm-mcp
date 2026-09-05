@@ -99,12 +99,9 @@ def plan_change(hosts: dict[str, str], lines: list[str]) -> ChangePlan:
     )
 
 
-_CaptureFn = Any
-
-
 def capture_pre_change_backups(
     plan: ChangePlan,
-    capture: _CaptureFn = capture_running_config,
+    capture: Any = capture_running_config,
     store: BackupStore | None = None,
 ) -> dict[str, BackupRecord]:
     """Capture and store pre-change backups for every planned host (§8.2).
@@ -122,8 +119,7 @@ def capture_pre_change_backups(
 
     Args:
         plan: The validated change plan.
-        capture: Injectable capture callable (defaults to
-            :func:`capture_running_config`).
+        capture: Injectable capture callable (defaults to :func:`capture_running_config`).
         store: Injectable backup store (defaults to the process-wide
             store from ``NORNIR_MCP_BACKUP_DIR``).
 

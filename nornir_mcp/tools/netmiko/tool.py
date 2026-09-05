@@ -479,9 +479,7 @@ class NetmikoTool(NornirBase):
             )
 
         successes = sum(1 for outcome in outcomes.values() if outcome.success)
-        if not outcomes:
-            result = "no_hosts"
-        elif successes == len(outcomes):
+        if successes == len(outcomes):
             result = "success"
         elif successes == 0:
             result = "failed"

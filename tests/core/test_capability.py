@@ -11,11 +11,7 @@ from typing import Any
 
 import pytest
 
-from nornir_mcp.core.capability import (
-    NETMIKO_DEVICE_TYPES,
-    netmiko_device_type,
-    supports_cli,
-)
+from nornir_mcp.core.capability import NETMIKO_DEVICE_TYPES, netmiko_device_type
 from nornir_mcp.core.errors import UnsupportedOperationError
 from tests.conftest import (
     FakeHost,
@@ -43,13 +39,10 @@ def test_netmiko_device_type_known_platforms() -> None:
     assert netmiko_device_type("ios") == "cisco_ios"
     assert netmiko_device_type("eos") == "arista_eos"
     assert NETMIKO_DEVICE_TYPES == {"ios": "cisco_ios", "eos": "arista_eos"}
-    assert supports_cli("ios") is True
-    assert supports_cli("eos") is True
 
 
 def test_netmiko_device_type_unknown_platform_raises_unsupported_operation() -> None:
     """Unknown platforms raise a capability error listing what is supported."""
-    assert supports_cli("junos") is False
     with pytest.raises(UnsupportedOperationError) as excinfo:
         netmiko_device_type("junos")
     message = str(excinfo.value)
