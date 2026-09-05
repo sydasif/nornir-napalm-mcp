@@ -97,17 +97,7 @@ def outcome_from_mcp_error(exc: McpError) -> HostOutcome:
         A ``HostOutcome`` with ``success=False`` whose ``error`` mirrors
         the error's §22 fields (type, message, host, operation, retryable).
     """
-    return HostOutcome(
-        success=False,
-        data=None,
-        error=StructuredError(
-            type=exc.error_type.value,
-            message=exc.message,
-            host=exc.host,
-            operation=exc.operation,
-            retryable=exc.retryable,
-        ),
-    )
+    return HostOutcome(success=False, data=None, error=StructuredError(**exc.to_dict()))
 
 
 def maybe_truncate(text: str, max_bytes: int | None = None) -> tuple[str, bool, int]:

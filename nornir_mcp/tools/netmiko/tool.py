@@ -6,6 +6,7 @@ import hashlib
 from typing import Any
 
 from fastmcp import Context
+from nornir.core.task import Result
 from nornir_netmiko.tasks import (
     netmiko_save_config,
     netmiko_send_command,
@@ -29,13 +30,38 @@ from nornir_mcp.core.errors import (
 )
 from nornir_mcp.core.policy import assert_read_allowed, canonicalize
 from nornir_mcp.core.runner import execution_lock
-from nornir_mcp.core.tasks import netmiko_send_commands, run_nornir_task
+from nornir_mcp.core.tasks import run_nornir_task
 from nornir_mcp.tools.netmiko.changes import (
     capture_pre_change_backups,
     dry_run_outcomes,
     parse_config_transcript,
     plan_change,
 )
+
+
+def netmiko_send_commands(task: Any, commands: list[str] | None = None, **kwargs: Any) -> Any:
+    """Run a batch of read-only commands over a netmiko connection.
+
+    nornir-netmiko 1.0.x no longer ships a batch plugin, so this in-house
+    task replicates the classic plugin semantics: each command is sent via
+    ``netmiko_send_command`` and collected into ``{hostname: {command:
+    output}}``. Tests replace the module-level name with the canned
+    ``fake_netmiko_send_commands`` (see conftest), which records exactly
+    which commands were sent.
+
+    Args:
+        task: The Nornir task for the target host.
+        commands: The commands to run, in order.
+
+    Returns:
+        A Nornir ``Result`` whose ``result`` maps the hostname to a
+        per-command output dict.
+    """
+    outputs: dict[str, str] = {}
+    for command in commands or []:
+        result = netmiko_send_command(task, command_string=command, **kwargs)
+        outputs[command] = result.result
+    return Result(host=task.host, result={task.host.name: outputs})
 
 
 class NetmikoTool(CoreBase):

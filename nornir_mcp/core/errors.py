@@ -24,7 +24,17 @@ not ``ConnectionError``, to avoid shadowing the Python builtin
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import ClassVar
+from typing import ClassVar, TypedDict
+
+
+class ErrorPayload(TypedDict):
+    """The §22 JSON shape produced by :meth:`McpError.to_dict`."""
+
+    type: str
+    message: str
+    host: str | None
+    operation: str | None
+    retryable: bool
 
 
 class ErrorType(StrEnum):
@@ -78,7 +88,7 @@ class McpError(Exception):
         self.error_type = error_type if error_type is not None else type(self)._error_type
         self.retryable = retryable if retryable is not None else type(self)._retryable
 
-    def to_dict(self) -> dict[str, str | bool | None]:
+    def to_dict(self) -> ErrorPayload:
         """Serialize to the §22 JSON shape.
 
         Returns:

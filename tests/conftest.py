@@ -62,7 +62,6 @@ class FakeTaskResult:
     result: Any
     failed: bool = False
     exception: Any = None
-    diff: str = ""
     changed: bool = False
 
 
@@ -158,7 +157,6 @@ class FakeNornir:
             changed = bool(result_str) or (task_name == "napalm_configure")
             payload = FakeTaskResult(
                 result=result_str,
-                diff="--- a\n+++ b\n+hostname foo\n",
                 changed=changed,
             )
             return {name: FakeHostResult([payload]) for name in hosts}

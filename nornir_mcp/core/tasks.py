@@ -1,16 +1,8 @@
-"""Shared task helpers — filtering, execution, and outcome normalization.
-
-``netmiko_send_commands`` lives here temporarily; it folds into
-``tools/netmiko/tool.py`` in Phase 4 of the redesign (which also removes
-``core``'s only ``nornir_netmiko`` import).
-"""
+"""Shared task helpers — filtering, execution, and outcome normalization."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
-
-from nornir.core.task import Result
-from nornir_netmiko.tasks import netmiko_send_command
 
 from nornir_mcp.core.envelope import HostOutcome, StructuredError, outcome_from_mcp_error
 from nornir_mcp.core.errors import DeviceConnectionError, ValidationError
@@ -23,7 +15,6 @@ __all__ = [
     "_filter_devices",
     "_results_to_outcomes",
     "run_nornir_task",
-    "netmiko_send_commands",
 ]
 
 
@@ -156,28 +147,3 @@ def run_nornir_task(
         nr = _filter_devices(nr, name=name, group=group, platform=platform)
         result = nr.run(task=task, **task_kwargs)
         return _results_to_outcomes(result, operation)
-
-
-def netmiko_send_commands(task: Any, commands: list[str] | None = None, **kwargs: Any) -> Any:
-    """Run a batch of read-only commands over a netmiko connection.
-
-    nornir-netmiko 1.0.x no longer ships a batch plugin, so this in-house
-    task replicates the classic plugin semantics: each command is sent via
-    ``netmiko_send_command`` and collected into ``{hostname: {command:
-    output}}``. Tests replace the server-level name with the canned
-    ``fake_netmiko_send_commands`` (see conftest), which records exactly
-    which commands were sent.
-
-    Args:
-        task: The Nornir task for the target host.
-        commands: The commands to run, in order.
-
-    Returns:
-        A Nornir ``Result`` whose ``result`` maps the hostname to a
-        per-command output dict.
-    """
-    outputs: dict[str, str] = {}
-    for command in commands or []:
-        result = netmiko_send_command(task, command_string=command, **kwargs)
-        outputs[command] = result.result
-    return Result(host=task.host, result={task.host.name: outputs})
