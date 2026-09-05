@@ -112,6 +112,29 @@ _Note: The inventory files referenced must exist relative to this config file._
 
 ---
 
+### Quickstart: run from GitHub with uvx
+
+No clone or virtualenv needed — `uvx` downloads the package from GitHub and runs it on the spot. Point `NORNIR_CONFIG` at your config (above) and:
+
+```bash
+# STDIO transport (default)
+NORNIR_CONFIG=/path/to/config.yaml uvx --from "git+https://github.com/sydasif/nornir-napalm-mcp" nornir-mcp
+
+# HTTP transport
+NORNIR_CONFIG=/path/to/config.yaml uvx --from "git+https://github.com/sydasif/nornir-napalm-mcp" nornir-mcp --transport http --host 0.0.0.0 --port 8000
+```
+
+For a persistent install, use `uv tool install` once, then run `nornir-mcp` like any other command:
+
+```bash
+uv tool install --from "git+https://github.com/sydasif/nornir-napalm-mcp" nornir-mcp
+NORNIR_CONFIG=/path/to/config.yaml nornir-mcp
+```
+
+To pin a specific revision, append `@<ref>` (a tag or commit hash) to the URL, e.g. `git+https://github.com/sydasif/nornir-napalm-mcp@<commit-sha>`.
+
+---
+
 ### MCP client configuration
 
 Register this server with any MCP client (Claude Desktop, VS Code, etc.) by adding the following to your project's `.mcp.json`:
@@ -179,6 +202,8 @@ uv run nornir-mcp --help
 ```
 
 _Note: there is no CLI flag for listing inventory — use the `nornir_list_inventory` MCP tool instead._
+
+The commands below assume a local checkout (`uv run nornir-mcp`). Installed from GitHub, replace `uv run nornir-mcp` with the `uvx --from "git+https://github.com/sydasif/nornir-napalm-mcp"` form from the [Quickstart](#quickstart-run-from-github-with-uvx), or run plain `nornir-mcp` after `uv tool install`.
 
 ### Run as MCP server (STDIO)
 
