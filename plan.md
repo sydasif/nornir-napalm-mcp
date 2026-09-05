@@ -418,6 +418,31 @@ Phases may be committed separately; each must end with the full suite green.
 all behavioral tests green with unchanged wire contracts; legacy flat files
 gone; docs updated.
 
+## 7.1 True-spirit reconciliation (post-implementation audit)
+
+An audit of the completed migration against the plan's binding rules found
+**two deviations** from the plan's true spirit (both confirmed test-green to
+fix, since neither changes registered behavior):
+
+- [x] **Class chain was a 3-way fan, not the mandated chain.** Phase 4
+  implemented `NapalmTool(CoreBase)` / `NetmikoTool(CoreBase)`, breaking the
+  §0.1/§3.2–3.4 contract `CoreBase → NornirBase → (NapalmTool |
+  NetmikoTool)` and the DRY rationale that roadmap tools extending
+  `NornirBase` inherit the whole chain. Fixed by swapping each class's base
+  to `NornirBase` (import from `tools.base.tool`; verified acyclic —
+  `tools/base` imports only `core.*` and its sibling `capture`). `_TOOLS`
+  registration unchanged: inherited NornirBase methods on napalm/netmiko
+  instances are never registered, so the 12-tool surface pin still holds.
+- [x] **`server.nornir_*` aliases survived**, contradicting §3.5/§8/Phase 5
+  ("exports nothing tool-shaped — the old module-level `server.nornir_*`
+  symbols are **gone**; no module-level `server.<tool>` shims survive").
+  Fixed by deleting the 12 aliases from `server.py` and rewriting the 67
+  test call sites (`server.nornir_X(...)` → `server._<instance>.nornir_X(...)`,
+  longest-name-first to avoid clobbering `nornir_run_commands` with
+  `nornir_run_command`) to target the **shared instances** (§6.1: single
+  source of truth for test identity, not fresh instances). e2e uses only
+  `server.mcp` — untouched.
+
 ## 8. Risks, decisions, and open items
 
 - **Wire schema must not drift.** Moving methods changes nothing FastMCP

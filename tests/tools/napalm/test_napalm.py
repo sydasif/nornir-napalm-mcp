@@ -59,7 +59,7 @@ def _isolated_backup_audit(
 
 def test_list_inventory_shape() -> None:
     """Verify the envelope and structure of the inventory list."""
-    env = server.nornir_list_inventory(_ctx())
+    env = server._nornir_base.nornir_list_inventory(_ctx())
     assert env.success is True
     assert env.error is None
     outcome = env.results["server"]
@@ -74,7 +74,7 @@ def test_list_inventory_shape() -> None:
 
 def test_list_inventory_sorted() -> None:
     """Verify that the inventory list is returned sorted by device name."""
-    env = server.nornir_list_inventory(_ctx())
+    env = server._nornir_base.nornir_list_inventory(_ctx())
     data = env.results["server"].data
     assert data is not None
     names = [d.name for d in data]
@@ -89,7 +89,7 @@ def test_list_inventory_empty(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr("nornir_mcp.core.runner.InitNornir", mock_init)
     runner.reset_nornir()
-    env = server.nornir_list_inventory(_ctx())
+    env = server._nornir_base.nornir_list_inventory(_ctx())
     assert env.results["server"].data == []
     assert env.success is True
 
@@ -101,7 +101,7 @@ def test_list_inventory_empty(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_get_facts_returns_envelope() -> None:
     """Verify nornir_get_facts returns per-host facts in a ToolEnvelope."""
-    env = server.nornir_get_facts(_ctx(), name="spine-01")
+    env = server._napalm_tools.nornir_get_facts(_ctx(), name="spine-01")
     assert env.success is True
     assert "spine-01" in env.results
     outcome = env.results["spine-01"]
@@ -113,20 +113,20 @@ def test_get_facts_returns_envelope() -> None:
 
 def test_get_facts_by_group() -> None:
     """Verify nornir_get_facts filters by group."""
-    env = server.nornir_get_facts(_ctx(), group="spine")
+    env = server._napalm_tools.nornir_get_facts(_ctx(), group="spine")
     assert "spine-01" in env.results
     assert "leaf-01" not in env.results
 
 
 def test_get_facts_by_platform() -> None:
     """Verify nornir_get_facts filters by platform."""
-    env = server.nornir_get_facts(_ctx(), platform="eos")
+    env = server._napalm_tools.nornir_get_facts(_ctx(), platform="eos")
     assert set(env.results.keys()) == {"spine-01", "leaf-01"}
 
 
 def test_no_matching_hosts_returns_envelope_validation_error_not_raise() -> None:
     """Filter misses become a request-level validation error, not a raise."""
-    env = server.nornir_get_facts(_ctx(), name="nonexistent")
+    env = server._napalm_tools.nornir_get_facts(_ctx(), name="nonexistent")
     assert env.success is False
     assert env.results == {}
     assert env.error is not None
@@ -143,7 +143,7 @@ def test_no_matching_hosts_returns_envelope_validation_error_not_raise() -> None
 
 def test_run_getter_returns_payload() -> None:
     """Verify nornir_run_getter returns the expected payload per host."""
-    env = server.nornir_run_getter(_ctx(), getter="arp_table", name="spine-01")
+    env = server._napalm_tools.nornir_run_getter(_ctx(), getter="arp_table", name="spine-01")
     outcome = env.results["spine-01"]
     assert outcome.success is True
     assert outcome.data is not None
@@ -153,7 +153,7 @@ def test_run_getter_returns_payload() -> None:
 
 def test_run_getter_with_options() -> None:
     """Verify nornir_run_getter passes getter_options through."""
-    result = server.nornir_run_getter(
+    result = server._napalm_tools.nornir_run_getter(
         _ctx(), getter="facts", name="spine-01", getter_options={"keys": ["hostname"]}
     )
     assert result.results["spine-01"] == HostOutcome(
@@ -174,7 +174,7 @@ def test_run_getter_normalizes_name_and_option_keys(monkeypatch: pytest.MonkeyPa
 
     monkeypatch.setattr("nornir_mcp.core.base.run_nornir_task", spy)
 
-    env = server.nornir_run_getter(
+    env = server._napalm_tools.nornir_run_getter(
         _ctx(), getter="arp_table", name="spine-01", getter_options={"keys": ["x"]}
     )
     assert env.success is True
@@ -185,7 +185,7 @@ def test_run_getter_normalizes_name_and_option_keys(monkeypatch: pytest.MonkeyPa
     assert kwargs["getters_options"] == {"get_arp_table": {"keys": ["x"]}}
 
     # Already-prefixed names pass through unchanged.
-    server.nornir_run_getter(_ctx(), getter="get_facts", name="spine-01")
+    server._napalm_tools.nornir_run_getter(_ctx(), getter="get_facts", name="spine-01")
     kwargs = captured["kwargs"]
     assert isinstance(kwargs, dict)
     assert kwargs["getters"] == ["get_facts"]
@@ -193,7 +193,9 @@ def test_run_getter_normalizes_name_and_option_keys(monkeypatch: pytest.MonkeyPa
 
 def test_run_getter_batch() -> None:
     """Verify nornir_run_getter with multiple devices."""
-    result = server.nornir_run_getter(_ctx(), getter="facts", name=["spine-01", "leaf-01"])
+    result = server._napalm_tools.nornir_run_getter(
+        _ctx(), getter="facts", name=["spine-01", "leaf-01"]
+    )
     assert set(result.results.keys()) == {"spine-01", "leaf-01"}
 
 
@@ -204,7 +206,7 @@ def test_run_getter_batch() -> None:
 
 def test_get_config_returns_config() -> None:
     """Verify nornir_get_config returns config data per host."""
-    env = server.nornir_get_config(_ctx(), name="spine-01")
+    env = server._napalm_tools.nornir_get_config(_ctx(), name="spine-01")
     assert env.success is True
     outcome = env.results["spine-01"]
     assert outcome.success is True
@@ -215,7 +217,7 @@ def test_get_config_returns_config() -> None:
 
 def test_get_config_running_only() -> None:
     """Verify nornir_get_config with retrieve='running'."""
-    env = server.nornir_get_config(_ctx(), name="spine-01", retrieve="running")
+    env = server._napalm_tools.nornir_get_config(_ctx(), name="spine-01", retrieve="running")
     data = env.results["spine-01"].data
     assert data is not None
     assert data["config"]["running"] is not None
@@ -223,9 +225,9 @@ def test_get_config_running_only() -> None:
 
 def test_get_config_sanitized_defaults_true() -> None:
     """Sanitized output is the default (never expose credentials, §22)."""
-    params = inspect.signature(server.nornir_get_config).parameters
+    params = inspect.signature(server._napalm_tools.nornir_get_config).parameters
     assert params["sanitized"].default is True
-    doc = server.nornir_get_config.__doc__ or ""
+    doc = server._napalm_tools.nornir_get_config.__doc__ or ""
     assert "password hashes" in doc
     assert "pre-shared keys" in doc
     assert "strips" in doc
@@ -245,10 +247,10 @@ def test_get_config_retrieve_rejects_invalid_literal() -> None:
 
 def test_config_format_parameter_accepted() -> None:
     """The format knob is config_format (no builtin shadowing) and works."""
-    params = inspect.signature(server.nornir_get_config).parameters
+    params = inspect.signature(server._napalm_tools.nornir_get_config).parameters
     assert "config_format" in params
     assert "format" not in params
-    env = server.nornir_get_config(_ctx(), name="spine-01", config_format="json")
+    env = server._napalm_tools.nornir_get_config(_ctx(), name="spine-01", config_format="json")
     assert env.success is True
     data = env.results["spine-01"].data
     assert data is not None
@@ -257,7 +259,7 @@ def test_config_format_parameter_accepted() -> None:
 
 def test_empty_name_list_returns_validation_envelope() -> None:
     """An explicit empty selection surfaces as a validation envelope error."""
-    env = server.nornir_get_facts(_ctx(), name=[])
+    env = server._napalm_tools.nornir_get_facts(_ctx(), name=[])
     assert env.success is False
     assert env.results == {}
     assert env.error is not None
@@ -266,9 +268,9 @@ def test_empty_name_list_returns_validation_envelope() -> None:
 
 
 _NO_FILTER_TOOLS: list[tuple[str, Callable[[Any], ToolEnvelope]]] = [
-    ("nornir_get_facts", lambda ctx: server.nornir_get_facts(ctx)),
-    ("nornir_run_getter", lambda ctx: server.nornir_run_getter(ctx, getter="facts")),
-    ("nornir_get_config", lambda ctx: server.nornir_get_config(ctx)),
+    ("nornir_get_facts", lambda ctx: server._napalm_tools.nornir_get_facts(ctx)),
+    ("nornir_run_getter", lambda ctx: server._napalm_tools.nornir_run_getter(ctx, getter="facts")),
+    ("nornir_get_config", lambda ctx: server._napalm_tools.nornir_get_config(ctx)),
 ]
 
 
@@ -279,7 +281,7 @@ def test_no_filters_targets_all_devices(
     """Omitted filters target every device, and docstrings say so explicitly."""
     env = call_tool(_ctx())
     assert set(env.results.keys()) == {"spine-01", "leaf-01"}
-    doc = getattr(server, name).__doc__ or ""
+    doc = getattr(server._napalm_tools, name).__doc__ or ""
     assert "Omit all filters to target every device in the inventory" in doc
 
 
@@ -290,7 +292,7 @@ def test_no_filters_targets_all_devices(
 
 def test_list_getters_returns_platforms() -> None:
     """Verify list_getters returns GetterInfo for each platform."""
-    env = server.nornir_list_getters(_ctx())
+    env = server._napalm_tools.nornir_list_getters(_ctx())
     assert env.success is True
     data = env.results["server"].data
     assert data is not None
@@ -300,7 +302,7 @@ def test_list_getters_returns_platforms() -> None:
 
 def test_list_getters_has_getters() -> None:
     """Verify the getter lists are non-empty for known platforms."""
-    data = server.nornir_list_getters(_ctx()).results["server"].data
+    data = server._napalm_tools.nornir_list_getters(_ctx()).results["server"].data
     assert data is not None
     for info in data:
         if info.platform == "eos":
@@ -310,7 +312,7 @@ def test_list_getters_has_getters() -> None:
 
 def test_list_getters_sorted_by_platform() -> None:
     """Verify results are sorted by platform name."""
-    data = server.nornir_list_getters(_ctx()).results["server"].data
+    data = server._napalm_tools.nornir_list_getters(_ctx()).results["server"].data
     assert data is not None
     names = [r.platform for r in data]
     assert names == sorted(names)
@@ -327,7 +329,7 @@ def test_list_getters_unknown_platform_returns_empty(monkeypatch: pytest.MonkeyP
 
     monkeypatch.setattr("nornir_mcp.core.runner.InitNornir", mock_init)
     runner.reset_nornir()
-    data = server.nornir_list_getters(_ctx()).results["server"].data
+    data = server._napalm_tools.nornir_list_getters(_ctx()).results["server"].data
     assert data is not None
     assert len(data) == 1
     assert data[0].platform == "nonexistent_os"

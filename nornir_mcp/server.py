@@ -44,19 +44,3 @@ _TOOLS: tuple[Any, ...] = (
 
 for _tool in _TOOLS:  # bound methods: `self` is bound,
     mcp.tool(name=_tool.__name__)(_tool)  # so the schema has no self param
-
-
-# Module-level aliases so direct-call references (``server.nornir_*``) resolve;
-# these point at the same bound methods registered on the MCP server above.
-nornir_list_inventory = _nornir_base.nornir_list_inventory
-nornir_reload_inventory = _nornir_base.nornir_reload_inventory
-nornir_backup_config = _nornir_base.nornir_backup_config
-nornir_list_backups = _nornir_base.nornir_list_backups
-nornir_get_facts = _napalm_tools.nornir_get_facts
-nornir_run_getter = _napalm_tools.nornir_run_getter
-nornir_get_config = _napalm_tools.nornir_get_config
-nornir_list_getters = _napalm_tools.nornir_list_getters
-nornir_run_command = _netmiko_tools.nornir_run_command
-nornir_run_commands = _netmiko_tools.nornir_run_commands
-nornir_apply_config = _netmiko_tools.nornir_apply_config
-nornir_save_config = _netmiko_tools.nornir_save_config

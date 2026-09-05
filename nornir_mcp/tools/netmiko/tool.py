@@ -14,7 +14,6 @@ from nornir_netmiko.tasks import (
 )
 
 from nornir_mcp.core.audit import get_audit_logger
-from nornir_mcp.core.base import CoreBase
 from nornir_mcp.core.capability import netmiko_device_type
 from nornir_mcp.core.envelope import (
     HostOutcome,
@@ -31,6 +30,7 @@ from nornir_mcp.core.errors import (
 from nornir_mcp.core.policy import assert_read_allowed, canonicalize
 from nornir_mcp.core.runner import execution_lock
 from nornir_mcp.core.tasks import run_nornir_task
+from nornir_mcp.tools.base.tool import NornirBase
 from nornir_mcp.tools.netmiko.changes import (
     capture_pre_change_backups,
     dry_run_outcomes,
@@ -64,7 +64,7 @@ def netmiko_send_commands(task: Any, commands: list[str] | None = None, **kwargs
     return Result(host=task.host, result={task.host.name: outputs})
 
 
-class NetmikoTool(CoreBase):
+class NetmikoTool(NornirBase):
     """Netmiko-family tools: CLI command runs and write-path ops."""
 
     def nornir_run_command(

@@ -7,12 +7,12 @@ from typing import Any, Literal
 from fastmcp import Context
 from nornir_napalm.plugins.tasks import napalm_get
 
-from nornir_mcp.core.base import CoreBase
 from nornir_mcp.core.envelope import ToolEnvelope
+from nornir_mcp.tools.base.tool import NornirBase
 from nornir_mcp.tools.napalm.introspection import list_getters
 
 
-class NapalmTool(CoreBase):
+class NapalmTool(NornirBase):
     """NAPALM-family tools: facts, getter, config retrieval, getter listing."""
 
     def nornir_get_facts(

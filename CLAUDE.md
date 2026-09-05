@@ -31,9 +31,11 @@ dependencies point down: `core` ← `tools/*` ← `server.py`.
 `CoreBase (core/base.py)` → `NornirBase (tools/base/tool.py)` →
 `NapalmTool (tools/napalm/tool.py)` / `NetmikoTool (tools/netmiko/tool.py)`.
 
-- `server.py` — composition root (~60 lines): instantiates the three classes,
-  registers the 12 bound methods on `mcp`; module-level aliases keep
-  `server.nornir_*` reachable for tests. The only module that knows FastMCP.
+- `server.py` — composition root (~40 lines): instantiates the three classes,
+  registers the 12 bound methods on `mcp`, exports nothing tool-shaped. The
+  only module that knows FastMCP. Tests target the shared instances
+  (`server._nornir_base`, `server._napalm_tools`, `server._netmiko_tools`)
+  for direct-call identity (§6.1).
 - `cli/main.py` — argparse CLI (`nornir-mcp` script + `python -m nornir_mcp`).
 - `core/` — shared kernel, no FastMCP, no registerable tools:
   - `base.py` — `CoreBase` owns the envelope/selection plumbing:

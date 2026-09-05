@@ -61,11 +61,11 @@ def _isolated_backup_audit(
 # ---------------------------------------------------------------------------
 
 _TOOL_CALLS: list[tuple[str, Callable[[Any], ToolEnvelope]]] = [
-    ("nornir_list_inventory", lambda ctx: server.nornir_list_inventory(ctx)),
-    ("nornir_get_facts", lambda ctx: server.nornir_get_facts(ctx)),
-    ("nornir_run_getter", lambda ctx: server.nornir_run_getter(ctx, getter="facts")),
-    ("nornir_get_config", lambda ctx: server.nornir_get_config(ctx)),
-    ("nornir_list_getters", lambda ctx: server.nornir_list_getters(ctx)),
+    ("nornir_list_inventory", lambda ctx: server._nornir_base.nornir_list_inventory(ctx)),
+    ("nornir_get_facts", lambda ctx: server._napalm_tools.nornir_get_facts(ctx)),
+    ("nornir_run_getter", lambda ctx: server._napalm_tools.nornir_run_getter(ctx, getter="facts")),
+    ("nornir_get_config", lambda ctx: server._napalm_tools.nornir_get_config(ctx)),
+    ("nornir_list_getters", lambda ctx: server._napalm_tools.nornir_list_getters(ctx)),
 ]
 
 
@@ -84,13 +84,13 @@ def test_every_migrated_tool_returns_envelope(
 
 def test_request_id_comes_from_context_when_available() -> None:
     """The envelope request_id is taken from the injected Context."""
-    env = server.nornir_list_inventory(_ctx())
+    env = server._nornir_base.nornir_list_inventory(_ctx())
     assert env.request_id == "test-request-id"
 
 
 def test_request_id_falls_back_to_uuid_when_context_has_none() -> None:
     """A ctx without request_id yields a uuid4().hex fallback."""
-    env = server.nornir_list_inventory(SimpleNamespace(request_id=None))  # type: ignore[arg-type]
+    env = server._nornir_base.nornir_list_inventory(SimpleNamespace(request_id=None))  # type: ignore[arg-type]
     assert len(env.request_id) == 32
     assert all(c in "0123456789abcdef" for c in env.request_id)
 
@@ -103,7 +103,7 @@ def test_request_id_falls_back_when_context_raises() -> None:
         def request_id(self) -> str:
             raise RuntimeError("no MCP session established")
 
-    env = server.nornir_list_inventory(_SessionlessCtx())  # type: ignore[arg-type]
+    env = server._nornir_base.nornir_list_inventory(_SessionlessCtx())  # type: ignore[arg-type]
     assert len(env.request_id) == 32
 
 
@@ -115,7 +115,7 @@ def test_request_id_falls_back_when_context_raises() -> None:
 def test_reload_inventory() -> None:
     """Verify reload returns a success envelope and clears the cache."""
     runner.get_nornir()
-    env = server.nornir_reload_inventory(_ctx())
+    env = server._nornir_base.nornir_reload_inventory(_ctx())
     assert env.success is True
     assert env.results == {}
     assert env.error is None
@@ -133,7 +133,7 @@ def test_batch_all_allowed_returns_per_command_map(
     netmiko_fakes: list[dict[str, Any]],
 ) -> None:
     """An all-allowed batch returns one truncated output per command."""
-    env = server.nornir_run_commands(
+    env = server._netmiko_tools.nornir_run_commands(
         commands=["show version", "show ip route"], name="spine-01", ctx=_ctx()
     )
     assert env.success is True
@@ -156,7 +156,7 @@ def test_batch_one_dangerous_command_rejected_others_executed(
     netmiko_fakes: list[dict[str, Any]],
 ) -> None:
     """A disallowed command fails only itself; the rest still run (§7.2)."""
-    env = server.nornir_run_commands(
+    env = server._netmiko_tools.nornir_run_commands(
         commands=["show version", "reload", "show interfaces"], name="spine-01", ctx=_ctx()
     )
     assert env.success is True  # some commands ran
@@ -175,7 +175,9 @@ def test_batch_all_rejected_executes_nothing(
     netmiko_fakes: list[dict[str, Any]],
 ) -> None:
     """When every command is rejected the host fails and nothing is sent."""
-    env = server.nornir_run_commands(commands=["reload", "wr e"], name="spine-01", ctx=_ctx())
+    env = server._netmiko_tools.nornir_run_commands(
+        commands=["reload", "wr e"], name="spine-01", ctx=_ctx()
+    )
     assert env.success is False
     outcome = env.results["spine-01"]
     assert outcome.success is False
@@ -193,7 +195,7 @@ def test_batch_order_preserved_in_results(
 ) -> None:
     """Command results keep the original batch order."""
     commands = ["show version", "show arp", "show ip route"]
-    env = server.nornir_run_commands(commands=commands, name="spine-01", ctx=_ctx())
+    env = server._netmiko_tools.nornir_run_commands(commands=commands, name="spine-01", ctx=_ctx())
     data = env.results["spine-01"].data
     assert data is not None
     assert list(data["commands"]) == commands
@@ -202,7 +204,7 @@ def test_batch_order_preserved_in_results(
 
 def test_batch_empty_list_rejected() -> None:
     """An empty commands list is a request-level validation error."""
-    env = server.nornir_run_commands(commands=[], name="spine-01", ctx=_ctx())
+    env = server._netmiko_tools.nornir_run_commands(commands=[], name="spine-01", ctx=_ctx())
     assert env.success is False
     assert env.results == {}
     assert env.error is not None
@@ -213,7 +215,7 @@ def test_batch_newline_in_any_command_rejects_request(
     netmiko_fakes: list[dict[str, Any]],
 ) -> None:
     """Any malformed command fails the whole batch; nothing is sent."""
-    env = server.nornir_run_commands(
+    env = server._netmiko_tools.nornir_run_commands(
         commands=["show version", "show version\nreload"], name="spine-01", ctx=_ctx()
     )
     assert env.success is False
@@ -230,7 +232,7 @@ def test_batch_newline_in_any_command_rejects_request(
 
 def test_backup_config_stores_file_and_returns_record() -> None:
     """A backup writes an immutable .cfg and returns its metadata."""
-    env = server.nornir_backup_config(name="spine-01", ctx=_ctx())
+    env = server._nornir_base.nornir_backup_config(name="spine-01", ctx=_ctx())
     assert env.success is True
     data = env.results["spine-01"].data
     assert data is not None
@@ -260,7 +262,7 @@ def test_backup_config_napalm_unavailable_falls_back_to_netmiko(
         "nornir_mcp.tools.base.capture.netmiko_send_command", fake_netmiko_send_command
     )
 
-    env = server.nornir_backup_config(name="spine-01", ctx=_ctx())
+    env = server._nornir_base.nornir_backup_config(name="spine-01", ctx=_ctx())
     assert env.success is True
     data = env.results["spine-01"].data
     assert data is not None
@@ -301,7 +303,7 @@ def test_backup_config_partial_failure_preserves_successes(
         "nornir_mcp.tools.base.capture.netmiko_send_command", fake_netmiko_send_command_failing
     )
 
-    env = server.nornir_backup_config(ctx=_ctx())
+    env = server._nornir_base.nornir_backup_config(ctx=_ctx())
     assert env.success is False
     assert env.results["spine-01"].success is True
     assert env.results["mx-01"].success is False
@@ -313,7 +315,7 @@ def test_backup_config_partial_failure_preserves_successes(
 
 def test_backup_config_writes_audit_line() -> None:
     """A backup appends one audit line with hashes only (spec §25)."""
-    env = server.nornir_backup_config(name="spine-01", ctx=_ctx())
+    env = server._nornir_base.nornir_backup_config(name="spine-01", ctx=_ctx())
     assert env.success is True
 
     lines = audit.get_audit_logger().log_path.read_text("utf-8").strip().splitlines()
@@ -334,7 +336,7 @@ def test_list_backups_returns_sorted_records() -> None:
     store.save("spine-01", "config one", trigger="standalone")
     store.save("spine-01", "config two", trigger="standalone")
 
-    env = server.nornir_list_backups(host="spine-01", ctx=_ctx())
+    env = server._nornir_base.nornir_list_backups(host="spine-01", ctx=_ctx())
     assert env.success is True
     data = env.results["server"].data
     assert data is not None
@@ -345,7 +347,7 @@ def test_list_backups_returns_sorted_records() -> None:
 
 def test_list_backups_rejects_traversal_host() -> None:
     """Unsafe host names fail at request level, before filesystem access."""
-    env = server.nornir_list_backups(host="../etc", ctx=_ctx())
+    env = server._nornir_base.nornir_list_backups(host="../etc", ctx=_ctx())
     assert env.success is False
     assert env.results == {}
     assert env.error is not None

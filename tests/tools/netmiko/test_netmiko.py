@@ -73,7 +73,9 @@ def test_run_command_show_returns_output_envelope(
     netmiko_fakes: list[dict[str, Any]],
 ) -> None:
     """A READ_ONLY command returns a truncation-shaped data envelope."""
-    env = server.nornir_run_command(command="show version", name="spine-01", ctx=_ctx())
+    env = server._netmiko_tools.nornir_run_command(
+        command="show version", name="spine-01", ctx=_ctx()
+    )
     assert env.success is True
     assert env.error is None
     outcome = env.results["spine-01"]
@@ -96,7 +98,7 @@ def test_run_command_reload_rejected_per_host_and_not_executed(
     netmiko_fakes: list[dict[str, Any]],
 ) -> None:
     """A DANGEROUS command is rejected per host; nothing reaches the device."""
-    env = server.nornir_run_command(command="reload", name="spine-01", ctx=_ctx())
+    env = server._netmiko_tools.nornir_run_command(command="reload", name="spine-01", ctx=_ctx())
     assert env.success is False
     outcome = env.results["spine-01"]
     assert outcome.success is False
@@ -111,7 +113,7 @@ def test_run_command_newline_rejected_at_request_level(
     netmiko_fakes: list[dict[str, Any]],
 ) -> None:
     """Multi-line commands fail at request level before any host gating."""
-    env = server.nornir_run_command(command="show version\nreload", ctx=_ctx())
+    env = server._netmiko_tools.nornir_run_command(command="show version\nreload", ctx=_ctx())
     assert env.success is False
     assert env.results == {}
     assert env.error is not None
@@ -125,7 +127,9 @@ def test_run_command_unknown_platform_capability_error(
     """Unsupported platforms fail per host with a capability error."""
     hosts = {"mx-01": FakeHost(name="mx-01", hostname="10.0.0.9", platform="junos", groups=[])}
     _patch_hosts(monkeypatch, hosts)
-    env = server.nornir_run_command(command="show version", name="mx-01", ctx=_ctx())
+    env = server._netmiko_tools.nornir_run_command(
+        command="show version", name="mx-01", ctx=_ctx()
+    )
     assert env.success is False
     outcome = env.results["mx-01"]
     assert outcome.success is False
@@ -142,7 +146,9 @@ def test_run_command_output_truncation_flags(
 ) -> None:
     """Outputs over the §21.1 byte budget are truncated with explicit flags."""
     monkeypatch.setenv("NORNIR_MCP_MAX_OUTPUT_BYTES", "16")
-    env = server.nornir_run_command(command="show version", name="spine-01", ctx=_ctx())
+    env = server._netmiko_tools.nornir_run_command(
+        command="show version", name="spine-01", ctx=_ctx()
+    )
     data = env.results["spine-01"].data
     assert data is not None
     canned = "canned output [spine-01]: show version"
@@ -160,7 +166,7 @@ def test_run_command_mixed_hosts_partial_success_preserved(
         "mx-01": FakeHost(name="mx-01", hostname="10.0.0.9", platform="junos", groups=[]),
     }
     _patch_hosts(monkeypatch, hosts)
-    env = server.nornir_run_command(command="show version", ctx=_ctx())
+    env = server._netmiko_tools.nornir_run_command(command="show version", ctx=_ctx())
     # Both outcomes preserved; only the passing host executed.
     assert env.success is False  # mx-01 failed its gate
     assert env.results["spine-01"].success is True
@@ -179,7 +185,9 @@ def test_apply_dry_run_returns_planned_commands_only_and_touches_nothing(
     netmiko_fakes: list[dict[str, Any]],
 ) -> None:
     """dry_run=True returns §16.1-labeled outcomes with ZERO device calls."""
-    env = server.nornir_apply_config(["interface Ethernet1", "description uplink"], ctx=_ctx())
+    env = server._netmiko_tools.nornir_apply_config(
+        ["interface Ethernet1", "description uplink"], ctx=_ctx()
+    )
     assert env.success is True
     for host, outcome in env.results.items():
         assert outcome.success is True
@@ -193,14 +201,14 @@ def test_apply_dry_run_returns_planned_commands_only_and_touches_nothing(
 
 def test_apply_dry_run_default_is_true() -> None:
     """dry_run defaults to True; there is NO backup flag (decision D5)."""
-    sig = inspect.signature(server.nornir_apply_config)
+    sig = inspect.signature(server._netmiko_tools.nornir_apply_config)
     assert sig.parameters["dry_run"].default is True
     assert "backup" not in sig.parameters
 
 
 def test_apply_dry_run_writes_audit_record() -> None:
     """Dry runs are audited with result 'dry_run' and a hash, never config text."""
-    server.nornir_apply_config(["interface Ethernet1"], ctx=_ctx())
+    server._netmiko_tools.nornir_apply_config(["interface Ethernet1"], ctx=_ctx())
     lines = Path(audit.get_audit_logger().log_path).read_text().splitlines()
     apply_records = [json.loads(line) for line in lines if "nornir_apply_config" in line]
     assert len(apply_records) == 1
@@ -223,7 +231,9 @@ def test_apply_backup_failure_blocks_apply_devices_untouched(
     monkeypatch.setattr(
         "nornir_mcp.tools.netmiko.tool.capture_pre_change_backups", failing_backups
     )
-    env = server.nornir_apply_config(["interface Ethernet1"], dry_run=False, ctx=_ctx())
+    env = server._netmiko_tools.nornir_apply_config(
+        ["interface Ethernet1"], dry_run=False, ctx=_ctx()
+    )
     assert env.success is False
     assert env.error is not None
     assert env.error.type == "backup"
@@ -236,7 +246,7 @@ def test_apply_success_clean_transcript(
 ) -> None:
     """Clean transcripts report applied == the config lines, success True."""
     config = ["interface Ethernet1", "description uplink"]
-    env = server.nornir_apply_config(config, dry_run=False, ctx=_ctx())
+    env = server._netmiko_tools.nornir_apply_config(config, dry_run=False, ctx=_ctx())
     assert env.success is True
     for host, outcome in env.results.items():
         assert outcome.success is True
@@ -260,7 +270,9 @@ def test_apply_error_transcript_reports_failure_not_success(
     netmiko_config_transcripts["spine-01"] = (
         "interface Ethernet1\n% Invalid input detected at 'Ethernet2'"
     )
-    env = server.nornir_apply_config(["interface Ethernet1"], dry_run=False, ctx=_ctx())
+    env = server._netmiko_tools.nornir_apply_config(
+        ["interface Ethernet1"], dry_run=False, ctx=_ctx()
+    )
     assert env.success is False
     spine = env.results["spine-01"]
     assert spine.success is False
@@ -281,7 +293,7 @@ def test_apply_partial_violations_flowed_through_per_host(
     """Policy violations block only the offending host; others still apply."""
     fake_nornir["spine-01"].platform = "ios"
     # 'format flash' is BLOCKED on ios but unknown (allowed) on eos.
-    env = server.nornir_apply_config(
+    env = server._netmiko_tools.nornir_apply_config(
         ["interface Ethernet1", "format flash"], dry_run=False, ctx=_ctx()
     )
     assert env.success is False
@@ -304,7 +316,7 @@ def test_apply_writes_audit_record_with_change_id_and_hash_not_config_text(
 ) -> None:
     """§25: audit carries change_id + sha256 of lines, never the lines."""
     config = ["interface Ethernet1", "description uplink"]
-    env = server.nornir_apply_config(config, dry_run=False, ctx=_ctx())
+    env = server._netmiko_tools.nornir_apply_config(config, dry_run=False, ctx=_ctx())
     assert env.success is True
     raw = Path(audit.get_audit_logger().log_path).read_text().splitlines()
     apply_records = [line for line in raw if "nornir_apply_config" in line]
@@ -325,7 +337,9 @@ def test_apply_envelope_invariant_mixed_hosts(
 ) -> None:
     """§21: one failing host makes top-level success False (error stays None)."""
     netmiko_config_transcripts["spine-01"] = "Error: incomplete command"
-    env = server.nornir_apply_config(["interface Ethernet1"], dry_run=False, ctx=_ctx())
+    env = server._netmiko_tools.nornir_apply_config(
+        ["interface Ethernet1"], dry_run=False, ctx=_ctx()
+    )
     assert env.error is None
     assert env.success is False
     assert env.results["spine-01"].success is False
@@ -339,7 +353,7 @@ def test_apply_envelope_invariant_mixed_hosts(
 
 def test_save_config_success_envelope(netmiko_fakes: list[dict[str, Any]]) -> None:
     """Both capable hosts save and report success."""
-    env = server.nornir_save_config(ctx=_ctx())
+    env = server._netmiko_tools.nornir_save_config(ctx=_ctx())
     assert env.success is True
     assert env.error is None
     assert set(env.results) == {"spine-01", "leaf-01"}
@@ -355,7 +369,7 @@ def test_save_config_unknown_platform_capability_error(
 ) -> None:
     """Unsupported platforms get a per-host capability error; nothing runs there."""
     fake_nornir["leaf-01"].platform = "junos"
-    env = server.nornir_save_config(ctx=_ctx())
+    env = server._netmiko_tools.nornir_save_config(ctx=_ctx())
     assert env.success is False
     leaf = env.results["leaf-01"]
     assert leaf.success is False
@@ -371,7 +385,7 @@ def test_save_config_writes_audit_record(
     netmiko_fakes: list[dict[str, Any]],
 ) -> None:
     """§11 saves are audit-logged (operation, hosts, result)."""
-    env = server.nornir_save_config(ctx=_ctx())
+    env = server._netmiko_tools.nornir_save_config(ctx=_ctx())
     assert env.success is True
     raw = Path(audit.get_audit_logger().log_path).read_text().splitlines()
     save_records = [line for line in raw if "nornir_save_config" in line]
@@ -399,7 +413,7 @@ def test_save_config_partial_failure_invariant(
     import nornir_mcp.tools.netmiko.tool as netmiko_tool_module
 
     monkeypatch.setattr(netmiko_tool_module, "netmiko_save_config", fake_netmiko_save_config_flaky)
-    env = server.nornir_save_config(ctx=_ctx())
+    env = server._netmiko_tools.nornir_save_config(ctx=_ctx())
     assert env.error is None
     assert env.success is False
     assert env.results["spine-01"].success is True
@@ -412,7 +426,9 @@ def test_save_config_partial_failure_invariant(
 
 def test_apply_does_not_save_config(netmiko_fakes: list[dict[str, Any]]) -> None:
     """Spec §11: apply never triggers the save path — saves are explicit-only."""
-    env = server.nornir_apply_config(["interface Ethernet1"], dry_run=False, ctx=_ctx())
+    env = server._netmiko_tools.nornir_apply_config(
+        ["interface Ethernet1"], dry_run=False, ctx=_ctx()
+    )
     assert env.success is True
     functions = [c["function"] for c in netmiko_fakes]
     assert "netmiko_save_config" not in functions
