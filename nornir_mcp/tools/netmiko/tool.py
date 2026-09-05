@@ -61,7 +61,7 @@ def netmiko_send_commands(task: Any, commands: list[str] | None = None, **kwargs
     for command in commands or []:
         result = netmiko_send_command(task, command_string=command, **kwargs)
         outputs[command] = result.result
-    return Result(host=task.host, result={task.host.name: outputs})
+    return Result(host=task.host, result=outputs)
 
 
 class NetmikoTool(NornirBase):
