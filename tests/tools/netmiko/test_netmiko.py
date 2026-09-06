@@ -282,7 +282,6 @@ def test_apply_success_clean_transcript(
         assert outcome.error is None
         assert outcome.data is not None
         assert outcome.data["applied"] == config
-        assert outcome.data["failed_at"] is None
         assert "no error patterns" in outcome.data["device_state"]
         assert outcome.data["change_id"].startswith("chg-")
         assert outcome.data["backup_id"]

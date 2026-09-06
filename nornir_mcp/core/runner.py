@@ -50,8 +50,6 @@ _PATH_KEYS: frozenset[str] = frozenset(
         "host_file",
         "group_file",
         "defaults_file",
-        "config_file",
-        "log_file",
     }
 )
 

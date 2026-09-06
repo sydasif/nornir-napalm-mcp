@@ -174,7 +174,7 @@ def parse_config_transcript(transcript: str, platform: str, lines: list[str]) ->
         lines: The config lines that were sent (reported on success).
 
     Returns:
-        ``{"applied": lines | None, "failed_at": None,
+        ``{"applied": lines | None,
         "device_state": str, "transcript": excerpt (errors only)}``.
     """
     patterns = CONFIG_ERROR_PATTERNS.get(platform, [])
@@ -183,13 +183,11 @@ def parse_config_transcript(transcript: str, platform: str, lines: list[str]) ->
             excerpt, _, _ = maybe_truncate(transcript)
             return {
                 "applied": None,
-                "failed_at": None,
                 "device_state": "unknown",
                 "transcript": excerpt,
             }
     return {
         "applied": lines,
-        "failed_at": None,
         "device_state": "unknown (no error patterns detected)",
     }
 

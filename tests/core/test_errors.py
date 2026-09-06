@@ -16,12 +16,9 @@ from nornir_mcp.core import errors
 from nornir_mcp.core.errors import (
     BackupError,
     CommandRejectedError,
-    ConfigurationError,
     DeviceConnectionError,
-    DeviceTimeoutError,
     ErrorType,
     InternalError,
-    InventoryError,
     McpError,
     UnsupportedOperationError,
     ValidationError,
@@ -30,13 +27,10 @@ from nornir_mcp.core.errors import (
 # (error class, expected error_type, expected retryable default)
 RETRYABLE_CASES: list[tuple[type[McpError], ErrorType, bool]] = [
     (ValidationError, ErrorType.VALIDATION, False),
-    (InventoryError, ErrorType.INVENTORY, False),
     (DeviceConnectionError, ErrorType.CONNECTION, True),
-    (DeviceTimeoutError, ErrorType.TIMEOUT, True),
     (CommandRejectedError, ErrorType.COMMAND_REJECTED, False),
     (UnsupportedOperationError, ErrorType.UNSUPPORTED_OPERATION, False),
     (BackupError, ErrorType.BACKUP, False),
-    (ConfigurationError, ErrorType.CONFIGURATION, False),
     (InternalError, ErrorType.INTERNAL, False),
 ]
 
@@ -77,11 +71,9 @@ def test_error_type_catalog_values() -> None:
         "validation",
         "inventory",
         "connection",
-        "authentication",
         "timeout",
         "command_rejected",
         "unsupported_operation",
-        "configuration",
         "backup",
         "internal",
     }
@@ -116,20 +108,14 @@ def test_mcp_error_works_as_plain_exception() -> None:
     assert exc.error_type is ErrorType.INTERNAL
 
     with pytest.raises(McpError):
-        raise DeviceTimeoutError("device unreachable", host="leaf-01")
+        raise DeviceConnectionError("device unreachable", host="leaf-01")
 
 
-def test_base_error_accepts_explicit_type_and_retryable() -> None:
-    """McpError itself can carry any category (e.g. authentication)."""
-    exc = McpError(
-        "authentication failed",
-        host="spine-01",
-        error_type=ErrorType.AUTHENTICATION,
-        retryable=False,
-    )
-    assert exc.error_type is ErrorType.AUTHENTICATION
+def test_base_error_uses_subclass_defaults() -> None:
+    """McpError uses subclass defaults for error_type and retryable."""
+    exc = McpError("boom")
+    assert exc.error_type is ErrorType.INTERNAL
     assert exc.retryable is False
-    assert exc.to_dict()["type"] == "authentication"
 
 
 # ---------------------------------------------------------------------------
@@ -152,13 +138,10 @@ def test_errors_module_has_expected_exports() -> None:
         "ErrorType",
         "McpError",
         "ValidationError",
-        "InventoryError",
         "DeviceConnectionError",
-        "DeviceTimeoutError",
         "CommandRejectedError",
         "UnsupportedOperationError",
         "BackupError",
-        "ConfigurationError",
         "InternalError",
     ):
         assert hasattr(errors, name), name

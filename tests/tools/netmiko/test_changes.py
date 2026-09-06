@@ -228,7 +228,6 @@ def test_parse_config_transcript_clean() -> None:
     lines = ["interface Ethernet1", "no shutdown"]
     parsed = parse_config_transcript("interface Ethernet1\nno shutdown\n", "eos", lines)
     assert parsed["applied"] == lines
-    assert parsed["failed_at"] is None
     assert "no error patterns" in parsed["device_state"]
 
 
@@ -237,7 +236,6 @@ def test_parse_config_transcript_detects_ios_error() -> None:
     transcript = "interface Ethernet1\n% Invalid input detected at 'Ethernet2'"
     parsed = parse_config_transcript(transcript, "ios", ["interface Ethernet1"])
     assert parsed["applied"] is None
-    assert parsed["failed_at"] is None
     assert parsed["device_state"] == "unknown"
     assert "% Invalid input" in parsed["transcript"]
 

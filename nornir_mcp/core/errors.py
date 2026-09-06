@@ -47,11 +47,9 @@ class ErrorType(StrEnum):
     VALIDATION = "validation"
     INVENTORY = "inventory"
     CONNECTION = "connection"
-    AUTHENTICATION = "authentication"
     TIMEOUT = "timeout"
     COMMAND_REJECTED = "command_rejected"
     UNSUPPORTED_OPERATION = "unsupported_operation"
-    CONFIGURATION = "configuration"
     BACKUP = "backup"
     INTERNAL = "internal"
 
@@ -63,8 +61,6 @@ class McpError(Exception):
         message: Human-readable error description.
         host: Target device name, or ``None`` if not device-scoped.
         operation: The tool/operation that failed, or ``None``.
-        error_type: Overrides the subclass's preset category.
-        retryable: Overrides the subclass's preset retry policy.
     """
 
     # Presets; subclasses override these. The base defaults to the most
@@ -77,16 +73,13 @@ class McpError(Exception):
         message: str,
         host: str | None = None,
         operation: str | None = None,
-        *,
-        error_type: ErrorType | None = None,
-        retryable: bool | None = None,
     ) -> None:
         super().__init__(message)
         self.message = message
         self.host = host
         self.operation = operation
-        self.error_type = error_type if error_type is not None else type(self)._error_type
-        self.retryable = retryable if retryable is not None else type(self)._retryable
+        self.error_type = type(self)._error_type
+        self.retryable = type(self)._retryable
 
     def to_dict(self) -> ErrorPayload:
         """Serialize to the §22 JSON shape.
@@ -112,13 +105,6 @@ class ValidationError(McpError):
     _retryable: ClassVar[bool] = False
 
 
-class InventoryError(McpError):
-    """Inventory loading or device lookup failure. Never retried."""
-
-    _error_type: ClassVar[ErrorType] = ErrorType.INVENTORY
-    _retryable: ClassVar[bool] = False
-
-
 class DeviceConnectionError(McpError):
     """Device connection failure (SSH/network).
 
@@ -128,13 +114,6 @@ class DeviceConnectionError(McpError):
     """
 
     _error_type: ClassVar[ErrorType] = ErrorType.CONNECTION
-    _retryable: ClassVar[bool] = True
-
-
-class DeviceTimeoutError(McpError):
-    """Device request timed out. Retryable per spec §23."""
-
-    _error_type: ClassVar[ErrorType] = ErrorType.TIMEOUT
     _retryable: ClassVar[bool] = True
 
 
@@ -156,13 +135,6 @@ class BackupError(McpError):
     """Backup failed or backup data unavailable. Never retried."""
 
     _error_type: ClassVar[ErrorType] = ErrorType.BACKUP
-    _retryable: ClassVar[bool] = False
-
-
-class ConfigurationError(McpError):
-    """Invalid configuration or config application failure. Never retried."""
-
-    _error_type: ClassVar[ErrorType] = ErrorType.CONFIGURATION
     _retryable: ClassVar[bool] = False
 
 

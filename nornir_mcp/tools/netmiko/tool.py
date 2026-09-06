@@ -292,7 +292,7 @@ class NetmikoTool(NornirBase):
 
         Returns:
             A ToolEnvelope with one HostOutcome per device. Successful
-            outcomes carry ``data = {"applied", "failed_at",
+            outcomes carry ``data = {"applied",
             "device_state", "change_id", "backup_id"}`` (plus
             ``"transcript"`` when error patterns were detected).
         """
