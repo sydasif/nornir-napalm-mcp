@@ -45,9 +45,7 @@ class ErrorType(StrEnum):
     """
 
     VALIDATION = "validation"
-    INVENTORY = "inventory"
     CONNECTION = "connection"
-    TIMEOUT = "timeout"
     COMMAND_REJECTED = "command_rejected"
     UNSUPPORTED_OPERATION = "unsupported_operation"
     BACKUP = "backup"

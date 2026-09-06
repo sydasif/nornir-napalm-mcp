@@ -69,9 +69,7 @@ def test_error_type_catalog_values() -> None:
     """Pin the exact ErrorType catalog to the spec's value strings."""
     assert {e.value for e in ErrorType} == {
         "validation",
-        "inventory",
         "connection",
-        "timeout",
         "command_rejected",
         "unsupported_operation",
         "backup",
