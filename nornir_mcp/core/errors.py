@@ -11,10 +11,10 @@ carries the §22 fields:
 
 Retry policy follows spec §23 — retries must be conservative:
 
-- **Retryable**: connection failures and timeouts (transient transport
+- **Retryable**: connection failures (transient transport
   issues, e.g. a temporary SSH/network failure).
-- **Never retry**: authentication failures, command/policy rejection,
-  configuration errors — and, by default, anything unclassified.
+- **Never retry**: command/policy rejection, backup, configuration,
+  validation, and internal errors — and, by default, anything unclassified.
 
 Naming note: the connection subclass is :class:`DeviceConnectionError`,
 not ``ConnectionError``, to avoid shadowing the Python builtin

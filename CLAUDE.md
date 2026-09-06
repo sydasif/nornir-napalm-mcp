@@ -59,7 +59,7 @@ dependencies point down: `core` ← `tools/*` ← `server.py`.
 private methods on that class; pure tested services and Nornir task callables
 → module functions; a model lives beside its only consumer — there is
 deliberately **no `models.py` anywhere**. Stateless core services are
-*imported*, never stored on `self` — a second instance would bypass the global
+_imported_, never stored on `self` — a second instance would bypass the global
 lock/cache (D7).
 
 ## Tool surface (frozen — do not change)
@@ -72,11 +72,11 @@ signature — preserve parameter names/order/defaults and docstrings verbatim.
 `ctx` differs by family: NAPALM tools take required `ctx: Context` first;
 netmiko tools take optional `ctx: Context | None = None` last — do not unify.
 
-| Spec tool | Implementation | Spec tool | Implementation |
-|---|---|---|---|
-| `network_run_command` | `nornir_run_command` | `network_backup_config` | `nornir_backup_config` |
-| `network_run_commands` | `nornir_run_commands` | `network_apply_config` | `nornir_apply_config` |
-| | | `network_save_config` | `nornir_save_config` |
+| Spec tool              | Implementation        | Spec tool               | Implementation         |
+| ---------------------- | --------------------- | ----------------------- | ---------------------- |
+| `network_run_command`  | `nornir_run_command`  | `network_backup_config` | `nornir_backup_config` |
+| `network_run_commands` | `nornir_run_commands` | `network_apply_config`  | `nornir_apply_config`  |
+|                        |                       | `network_save_config`   | `nornir_save_config`   |
 
 Deferred spec tools (diff, rollback, approval) follow the same `nornir_` convention.
 
@@ -171,8 +171,8 @@ The user-facing safety model is in `README.md` → Safety model.
 ## Error handling conventions
 
 - `McpError` subclasses carry §22 fields and serialize via `to_dict()`;
-  retry policy (§23): connection/timeout retryable; auth, policy rejection,
-  and configuration errors never.
+  retry policy (§23): connection retryable; auth, policy rejection,
+  backup, configuration, and internal errors never.
 - `ValidationError`: multi-line/control-char commands, explicitly empty device
   lists, unsafe host/backup identifiers, empty config batches.
 - Request-level failures set the envelope `error` with empty `results`;
