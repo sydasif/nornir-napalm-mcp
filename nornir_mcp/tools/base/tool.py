@@ -14,7 +14,7 @@ from nornir_mcp.core.envelope import (
     outcome_from_mcp_error,
 )
 from nornir_mcp.core.errors import InternalError, McpError, ValidationError
-from nornir_mcp.core.runner import get_nornir, reset_nornir
+from nornir_mcp.core.runner import execution_lock, get_nornir, reset_nornir
 from nornir_mcp.core.storage import get_backup_store
 from nornir_mcp.tools.base.capture import capture_running_config
 from nornir_mcp.tools.base.connectivity import (
@@ -214,11 +214,13 @@ class NornirBase(CoreBase):
         Returns:
             A ToolEnvelope with one HostOutcome per device. Successful outcomes
             contain data with keys: host, hostname, mode, reachable, latency_ms.
-            ``success`` means the probe executed without an internal error — it
-            does **not** imply the host is up; check ``data.reachable`` for the
-            reachability result. When unreachable_as_error=True and a host is
-            unreachable, the outcome is marked as failure with a connection-type
-            error.
+            A successful outcome with ``reachable=False`` additionally includes
+            ``error_detail`` when the probe reported one (e.g. a timeout, DNS
+            failure, or missing ping executable). ``success`` means the probe
+            executed without an internal error — it does **not** imply the host
+            is up; check ``data.reachable`` for the reachability result. When
+            unreachable_as_error=True and a host is unreachable, the outcome is
+            marked as failure with a connection-type error.
         """
         operation = "nornir_ping"
         request_id = self._request_id(ctx)
@@ -231,90 +233,111 @@ class NornirBase(CoreBase):
                 f"timeout_ms must be between 100 and 10000, got {timeout_ms}",
             )
 
-        error, targets = self._select_targets(operation, request_id, name, group, platform)
-        if error is not None:
-            return error
-        assert targets is not None
-
         outcomes: dict[str, HostOutcome] = {}
         reachable_count = 0
         unreachable_count = 0
         invalid_count = 0
 
-        for host in targets.inventory.hosts.values():
-            hostname = host.name
-            target_hostname = str(host.hostname).strip() if host.hostname else ""
+        # Selection and probing touch the shared Nornir singleton
+        # (nr.data.reset_failed_hosts() in _select_targets), so they run under
+        # the global execution lock — FastMCP may execute sync tools in a
+        # threadpool, and the lock serializes access to Nornir's GlobalState.
+        with execution_lock():
+            error, targets = self._select_targets(operation, request_id, name, group, platform)
+            if error is not None:
+                return error
+            assert targets is not None
 
-            # Validate the hostname from inventory
-            if not target_hostname:
-                outcomes[hostname] = HostOutcome(
-                    success=False,
-                    error=StructuredError(
-                        type="validation",
-                        message="Host inventory hostname is empty",
-                        host=hostname,
-                        operation=operation,
-                        retryable=False,
-                    ),
-                )
-                invalid_count += 1
-                continue
+            for host in targets.inventory.hosts.values():
+                hostname = host.name
+                target_hostname = str(host.hostname).strip() if host.hostname else ""
 
-            try:
-                validated_target = validate_probe_target(target_hostname)
-            except ValidationError as exc:
-                outcomes[hostname] = HostOutcome(
-                    success=False,
-                    error=StructuredError(
-                        type="validation",
-                        message=str(exc),
-                        host=hostname,
-                        operation=operation,
-                        retryable=False,
-                    ),
-                )
-                invalid_count += 1
-                continue
-
-            # Perform the ping
-            reachable, latency_ms, error_detail = icmp_ping_host(validated_target, timeout_ms)
-
-            if reachable:
-                reachable_count += 1
-                outcomes[hostname] = HostOutcome(
-                    success=True,
-                    data={
-                        "host": hostname,
-                        "hostname": validated_target,
-                        "mode": "icmp",
-                        "reachable": True,
-                        "latency_ms": latency_ms,
-                    },
-                )
-            else:
-                unreachable_count += 1
-                if unreachable_as_error:
+                # Validate the hostname from inventory
+                if not target_hostname:
                     outcomes[hostname] = HostOutcome(
                         success=False,
                         error=StructuredError(
-                            type="connection",
-                            message=error_detail or "Host unreachable",
+                            type="validation",
+                            message="Host inventory hostname is empty",
                             host=hostname,
                             operation=operation,
-                            retryable=True,
+                            retryable=False,
                         ),
                     )
-                else:
+                    invalid_count += 1
+                    continue
+
+                try:
+                    validated_target = validate_probe_target(target_hostname)
+                except ValidationError as exc:
+                    outcomes[hostname] = HostOutcome(
+                        success=False,
+                        error=StructuredError(
+                            type="validation",
+                            message=str(exc),
+                            host=hostname,
+                            operation=operation,
+                            retryable=False,
+                        ),
+                    )
+                    invalid_count += 1
+                    continue
+
+                # Perform the ping; isolate unexpected helper failures per host
+                # so one bad probe never hides the others or crashes the request.
+                try:
+                    reachable, latency_ms, error_detail = icmp_ping_host(
+                        validated_target, timeout_ms
+                    )
+                except Exception as exc:  # noqa: BLE001 — per-host isolation
+                    outcomes[hostname] = HostOutcome(
+                        success=False,
+                        error=StructuredError(
+                            type="internal",
+                            message=f"ping diagnostic failed unexpectedly: {exc}",
+                            host=hostname,
+                            operation=operation,
+                            retryable=False,
+                        ),
+                    )
+                    continue
+
+                if reachable:
+                    reachable_count += 1
                     outcomes[hostname] = HostOutcome(
                         success=True,
                         data={
                             "host": hostname,
                             "hostname": validated_target,
                             "mode": "icmp",
-                            "reachable": False,
-                            "latency_ms": None,
+                            "reachable": True,
+                            "latency_ms": latency_ms,
                         },
                     )
+                else:
+                    unreachable_count += 1
+                    if unreachable_as_error:
+                        outcomes[hostname] = HostOutcome(
+                            success=False,
+                            error=StructuredError(
+                                type="connection",
+                                message=error_detail or "Host unreachable",
+                                host=hostname,
+                                operation=operation,
+                                retryable=True,
+                            ),
+                        )
+                    else:
+                        outcome_data: dict[str, object] = {
+                            "host": hostname,
+                            "hostname": validated_target,
+                            "mode": "icmp",
+                            "reachable": False,
+                            "latency_ms": None,
+                        }
+                        if error_detail is not None:
+                            outcome_data["error_detail"] = error_detail
+                        outcomes[hostname] = HostOutcome(success=True, data=outcome_data)
 
         # Determine audit result based on host outcome success (not reachability)
         successes = sum(1 for o in outcomes.values() if o.success)
@@ -370,9 +393,11 @@ class NornirBase(CoreBase):
         Returns:
             A ToolEnvelope with one HostOutcome per device. Successful outcomes
             contain data with keys: host, hostname, port, mode, reachable,
-            latency_ms. ``success`` means the probe executed without an internal
-            error — it does **not** imply the host is up; check
-            ``data.reachable`` for the reachability result. When
+            latency_ms. A successful outcome with ``reachable=False``
+            additionally includes ``error_detail`` when the probe reported one
+            (e.g. a timeout or refused connection). ``success`` means the probe
+            executed without an internal error — it does **not** imply the host
+            is up; check ``data.reachable`` for the reachability result. When
             unreachable_as_error=True and a host is unreachable, the outcome is
             marked as failure with a connection-type error.
         """
@@ -391,83 +416,77 @@ class NornirBase(CoreBase):
                 f"timeout_ms must be between 100 and 10000, got {timeout_ms}",
             )
 
-        error, targets = self._select_targets(operation, request_id, name, group, platform)
-        if error is not None:
-            return error
-        assert targets is not None
-
         outcomes: dict[str, HostOutcome] = {}
         reachable_count = 0
         unreachable_count = 0
         invalid_count = 0
 
-        for host in targets.inventory.hosts.values():
-            hostname = host.name
-            target_hostname = str(host.hostname).strip() if host.hostname else ""
+        # Selection and probing touch the shared Nornir singleton
+        # (nr.data.reset_failed_hosts() in _select_targets), so they run under
+        # the global execution lock — FastMCP may execute sync tools in a
+        # threadpool, and the lock serializes access to Nornir's GlobalState.
+        with execution_lock():
+            error, targets = self._select_targets(operation, request_id, name, group, platform)
+            if error is not None:
+                return error
+            assert targets is not None
 
-            # Validate the hostname from inventory
-            if not target_hostname:
-                outcomes[hostname] = HostOutcome(
-                    success=False,
-                    error=StructuredError(
-                        type="validation",
-                        message="Host inventory hostname is empty",
-                        host=hostname,
-                        operation=operation,
-                        retryable=False,
-                    ),
-                )
-                invalid_count += 1
-                continue
+            for host in targets.inventory.hosts.values():
+                hostname = host.name
+                target_hostname = str(host.hostname).strip() if host.hostname else ""
 
-            try:
-                validated_target = validate_probe_target(target_hostname)
-            except ValidationError as exc:
-                outcomes[hostname] = HostOutcome(
-                    success=False,
-                    error=StructuredError(
-                        type="validation",
-                        message=str(exc),
-                        host=hostname,
-                        operation=operation,
-                        retryable=False,
-                    ),
-                )
-                invalid_count += 1
-                continue
-
-            # Perform the TCP reachability check (no auth, no CLI)
-            reachable, latency_ms, error_detail = check_tcp_host(
-                validated_target, port, timeout_ms
-            )
-
-            if reachable:
-                reachable_count += 1
-                outcomes[hostname] = HostOutcome(
-                    success=True,
-                    data={
-                        "host": hostname,
-                        "hostname": validated_target,
-                        "port": port,
-                        "mode": "tcp",
-                        "reachable": True,
-                        "latency_ms": latency_ms,
-                    },
-                )
-            else:
-                unreachable_count += 1
-                if unreachable_as_error:
+                # Validate the hostname from inventory
+                if not target_hostname:
                     outcomes[hostname] = HostOutcome(
                         success=False,
                         error=StructuredError(
-                            type="connection",
-                            message=error_detail or "Host unreachable",
+                            type="validation",
+                            message="Host inventory hostname is empty",
                             host=hostname,
                             operation=operation,
-                            retryable=True,
+                            retryable=False,
                         ),
                     )
-                else:
+                    invalid_count += 1
+                    continue
+
+                try:
+                    validated_target = validate_probe_target(target_hostname)
+                except ValidationError as exc:
+                    outcomes[hostname] = HostOutcome(
+                        success=False,
+                        error=StructuredError(
+                            type="validation",
+                            message=str(exc),
+                            host=hostname,
+                            operation=operation,
+                            retryable=False,
+                        ),
+                    )
+                    invalid_count += 1
+                    continue
+
+                # Perform the TCP reachability check (no auth, no CLI); isolate
+                # unexpected helper failures per host.
+                try:
+                    reachable, latency_ms, error_detail = check_tcp_host(
+                        validated_target, port, timeout_ms
+                    )
+                except Exception as exc:  # noqa: BLE001 — per-host isolation
+                    outcomes[hostname] = HostOutcome(
+                        success=False,
+                        error=StructuredError(
+                            type="internal",
+                            message=f"ssh check diagnostic failed unexpectedly: {exc}",
+                            host=hostname,
+                            operation=operation,
+                            retryable=False,
+                        ),
+                    )
+                    continue
+
+                if reachable:
+                    reachable_count += 1
                     outcomes[hostname] = HostOutcome(
                         success=True,
                         data={
@@ -475,10 +494,35 @@ class NornirBase(CoreBase):
                             "hostname": validated_target,
                             "port": port,
                             "mode": "tcp",
-                            "reachable": False,
-                            "latency_ms": None,
+                            "reachable": True,
+                            "latency_ms": latency_ms,
                         },
                     )
+                else:
+                    unreachable_count += 1
+                    if unreachable_as_error:
+                        outcomes[hostname] = HostOutcome(
+                            success=False,
+                            error=StructuredError(
+                                type="connection",
+                                message=error_detail or "Host unreachable",
+                                host=hostname,
+                                operation=operation,
+                                retryable=True,
+                            ),
+                        )
+                    else:
+                        outcome_data: dict[str, object] = {
+                            "host": hostname,
+                            "hostname": validated_target,
+                            "port": port,
+                            "mode": "tcp",
+                            "reachable": False,
+                            "latency_ms": None,
+                        }
+                        if error_detail is not None:
+                            outcome_data["error_detail"] = error_detail
+                        outcomes[hostname] = HostOutcome(success=True, data=outcome_data)
 
         # Determine audit result based on host outcome success (not reachability)
         successes = sum(1 for o in outcomes.values() if o.success)

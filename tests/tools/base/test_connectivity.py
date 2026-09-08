@@ -4,17 +4,19 @@ from __future__ import annotations
 
 import json
 import subprocess
-from collections.abc import Generator
+import threading
+from collections.abc import Callable, Generator
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import MagicMock, patch
 
 import pytest
 
 from nornir_mcp import server
 from nornir_mcp.core import audit, runner, storage
+from nornir_mcp.core.envelope import HostOutcome, ToolEnvelope
 from nornir_mcp.core.errors import ValidationError
+from nornir_mcp.core.runner import EXECUTION_LOCK
 from nornir_mcp.tools.base.connectivity import (
     build_ping_command,
     check_tcp_host,
@@ -141,29 +143,37 @@ def test_build_ping_command_returns_argv_list() -> None:
     assert "example.com" in cmd
 
 
-def test_build_ping_command_windows() -> None:
+def test_build_ping_command_windows(monkeypatch: pytest.MonkeyPatch) -> None:
     """build_ping_command returns Windows-appropriate command."""
-    with patch("platform.system", return_value="Windows"):
-        cmd = build_ping_command("192.168.1.1", 1500)
-        expected = ["ping", "-n", "1", "-w", "1500", "192.168.1.1"]
-        assert cmd == expected
+    monkeypatch.setattr("platform.system", lambda: "Windows")
+    cmd = build_ping_command("192.168.1.1", 1500)
+    expected = ["ping", "-n", "1", "-w", "1500", "192.168.1.1"]
+    assert cmd == expected
 
 
-def test_build_ping_command_linux() -> None:
+def test_build_ping_command_linux(monkeypatch: pytest.MonkeyPatch) -> None:
     """build_ping_command returns Linux-appropriate command."""
-    with patch("platform.system", return_value="Linux"):
-        cmd = build_ping_command("192.168.1.1", 1500)
-        # 1500 ms -> 2 seconds (rounded up, min 1)
-        expected = ["ping", "-c", "1", "-W", "2", "192.168.1.1"]
-        assert cmd == expected
+    monkeypatch.setattr("platform.system", lambda: "Linux")
+    cmd = build_ping_command("192.168.1.1", 1500)
+    # 1500 ms -> 2 seconds (rounded up, min 1)
+    expected = ["ping", "-c", "1", "-W", "2", "192.168.1.1"]
+    assert cmd == expected
 
 
-def test_build_ping_command_darwin() -> None:
+def test_build_ping_command_linux_uses_ceil_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Linux ping timeout ceil()s milliseconds to whole seconds (min 1)."""
+    monkeypatch.setattr("platform.system", lambda: "Linux")
+    for timeout_ms, expected_sec in [(500, "1"), (1500, "2"), (2500, "3")]:
+        cmd = build_ping_command("192.168.1.1", timeout_ms)
+        assert cmd == ["ping", "-c", "1", "-W", expected_sec, "192.168.1.1"]
+
+
+def test_build_ping_command_darwin(monkeypatch: pytest.MonkeyPatch) -> None:
     """build_ping_command returns Darwin/Unix-appropriate command."""
-    with patch("platform.system", return_value="Darwin"):
-        cmd = build_ping_command("192.168.1.1", 1500)
-        expected = ["ping", "-c", "1", "192.168.1.1"]
-        assert cmd == expected
+    monkeypatch.setattr("platform.system", lambda: "Darwin")
+    cmd = build_ping_command("192.168.1.1", 1500)
+    expected = ["ping", "-c", "1", "192.168.1.1"]
+    assert cmd == expected
 
 
 def test_icmp_ping_host_returns_latency_on_success() -> None:
@@ -227,6 +237,42 @@ def test_icmp_ping_host_returns_failure_on_missing_executable() -> None:
     assert "ping executable not found" in error
 
 
+def test_icmp_ping_host_returns_failure_on_permission_error() -> None:
+    """icmp_ping_host returns reachable=False when ping permission is denied."""
+
+    def fake_runner(_cmd: list[str], _timeout: float) -> subprocess.CompletedProcess[str]:
+        raise PermissionError()
+
+    reachable, latency_ms, error = icmp_ping_host("192.168.1.1", 1000, fake_runner)
+    assert reachable is False
+    assert latency_ms is None
+    assert error is not None
+    assert "permission denied" in error
+
+
+def test_icmp_ping_host_returns_failure_on_os_error() -> None:
+    """icmp_ping_host treats OSError as an expected, graceful failure."""
+
+    def fake_runner(_cmd: list[str], _timeout: float) -> subprocess.CompletedProcess[str]:
+        raise OSError("operation not permitted")
+
+    reachable, latency_ms, error = icmp_ping_host("192.168.1.1", 1000, fake_runner)
+    assert reachable is False
+    assert latency_ms is None
+    assert error is not None
+    assert "operation not permitted" in error
+
+
+def test_icmp_ping_host_propagates_unexpected_exceptions() -> None:
+    """Unexpected runner exceptions propagate instead of being swallowed."""
+
+    def fake_runner(_cmd: list[str], _timeout: float) -> subprocess.CompletedProcess[str]:
+        raise RuntimeError("boom")
+
+    with pytest.raises(RuntimeError, match="boom"):
+        icmp_ping_host("192.168.1.1", 1000, fake_runner)
+
+
 def test_icmp_ping_host_allows_validation_error_to_propagate() -> None:
     """icmp_ping_host allows ValidationError to propagate for invalid target."""
     with pytest.raises(ValidationError):
@@ -250,6 +296,47 @@ def _ctx() -> Any:
     return SimpleNamespace(request_id="test-request-id")
 
 
+def _ping_stub(
+    result: tuple[bool, float | None, str | None] = (True, 1.0, None),
+) -> tuple[Callable[[str, int], tuple[bool, float | None, str | None]], list[tuple[str, int]]]:
+    """Return a fake ``icmp_ping_host`` (exact signature) and its call recorder."""
+    calls: list[tuple[str, int]] = []
+
+    def fake(hostname: str, timeout_ms: int) -> tuple[bool, float | None, str | None]:
+        calls.append((hostname, timeout_ms))
+        return result
+
+    return fake, calls
+
+
+def _tcp_stub(
+    result: tuple[bool, float | None, str | None] = (True, 1.0, None),
+) -> tuple[
+    Callable[[str, int, int], tuple[bool, float | None, str | None]],
+    list[tuple[str, int, int]],
+]:
+    """Return a fake ``check_tcp_host`` (exact signature) and its call recorder."""
+    calls: list[tuple[str, int, int]] = []
+
+    def fake(hostname: str, port: int, timeout_ms: int) -> tuple[bool, float | None, str | None]:
+        calls.append((hostname, port, timeout_ms))
+        return result
+
+    return fake, calls
+
+
+def monkeypatch_inventory(hosts_data: dict[str, Any], monkeypatch: pytest.MonkeyPatch) -> None:
+    """Replace the fake Nornir inventory with a custom host map."""
+
+    def mock_init(**_: object) -> FakeNornir:
+        return FakeNornir(FakeInventory(FakeHosts(hosts_data)))
+
+    # String-based monkeypatch (mirrors conftest) so mypy does not flag the
+    # re-export; reset_nornir clears the cached singleton.
+    monkeypatch.setattr("nornir_mcp.core.runner.InitNornir", mock_init)
+    runner.reset_nornir()
+
+
 @pytest.fixture(autouse=True)
 def _reload_server(request: pytest.FixtureRequest) -> Generator[None]:
     """Reset runner's cached Nornir singleton before each test."""
@@ -271,10 +358,10 @@ def _isolated_backup_audit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> G
     audit.reset_audit_logger()
 
 
-@patch("nornir_mcp.tools.base.tool.icmp_ping_host")
-def test_nornir_ping_reachable_host(mock_ping: MagicMock) -> None:
+def test_nornir_ping_reachable_host(monkeypatch: pytest.MonkeyPatch) -> None:
     """A reachable host returns success and structured data."""
-    mock_ping.return_value = (True, 23.4, None)
+    fake_ping, _ = _ping_stub((True, 23.4, None))
+    monkeypatch.setattr("nornir_mcp.tools.base.tool.icmp_ping_host", fake_ping)
 
     env = server._nornir_base.nornir_ping(name="spine-01", ctx=_ctx())
     assert env.success is True
@@ -289,23 +376,24 @@ def test_nornir_ping_reachable_host(mock_ping: MagicMock) -> None:
     assert data["latency_ms"] == 23.4
 
 
-@patch("nornir_mcp.tools.base.tool.icmp_ping_host")
-def test_nornir_ping_data_shape(mock_ping: MagicMock) -> None:
+def test_nornir_ping_data_shape(monkeypatch: pytest.MonkeyPatch) -> None:
     """Result data includes host, hostname, mode, reachable, latency_ms."""
-    mock_ping.return_value = (True, 12.0, None)
+    fake_ping, _ = _ping_stub((True, 12.0, None))
+    monkeypatch.setattr("nornir_mcp.tools.base.tool.icmp_ping_host", fake_ping)
 
     env = server._nornir_base.nornir_ping(name="leaf-01", ctx=_ctx())
     data = env.results["leaf-01"].data
     assert data is not None
     assert set(data) == {"host", "hostname", "mode", "reachable", "latency_ms"}
+    assert "error_detail" not in data
     assert data["mode"] == "icmp"
     assert data["reachable"] is True
 
 
-@patch("nornir_mcp.tools.base.tool.icmp_ping_host")
-def test_nornir_ping_unreachable_success_when_flag_false(mock_ping: MagicMock) -> None:
+def test_nornir_ping_unreachable_success_when_flag_false(monkeypatch: pytest.MonkeyPatch) -> None:
     """Unreachable host with unreachable_as_error=False succeeds with reachable=False."""
-    mock_ping.return_value = (False, None, "Network is unreachable")
+    fake_ping, _ = _ping_stub((False, None, "Network is unreachable"))
+    monkeypatch.setattr("nornir_mcp.tools.base.tool.icmp_ping_host", fake_ping)
 
     env = server._nornir_base.nornir_ping(name="spine-01", unreachable_as_error=False, ctx=_ctx())
     assert env.success is True
@@ -315,12 +403,13 @@ def test_nornir_ping_unreachable_success_when_flag_false(mock_ping: MagicMock) -
     assert data is not None
     assert data["reachable"] is False
     assert data["latency_ms"] is None
+    assert data["error_detail"] == "Network is unreachable"
 
 
-@patch("nornir_mcp.tools.base.tool.icmp_ping_host")
-def test_nornir_ping_unreachable_error_when_flag_true(mock_ping: MagicMock) -> None:
+def test_nornir_ping_unreachable_error_when_flag_true(monkeypatch: pytest.MonkeyPatch) -> None:
     """Unreachable host with unreachable_as_error=True fails with connection error."""
-    mock_ping.return_value = (False, None, "Network is unreachable")
+    fake_ping, _ = _ping_stub((False, None, "Network is unreachable"))
+    monkeypatch.setattr("nornir_mcp.tools.base.tool.icmp_ping_host", fake_ping)
 
     env = server._nornir_base.nornir_ping(name="spine-01", unreachable_as_error=True, ctx=_ctx())
     assert env.success is False
@@ -356,11 +445,12 @@ def test_nornir_ping_empty_name_list() -> None:
     assert env.error.type == "validation"
 
 
-@patch("nornir_mcp.tools.base.tool.icmp_ping_host")
 def test_nornir_ping_missing_hostname_fails_validation(
-    mock_ping: MagicMock, monkeypatch: pytest.MonkeyPatch
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A host with empty inventory hostname produces a failed validation outcome."""
+    fake_ping, calls = _ping_stub()
+    monkeypatch.setattr("nornir_mcp.tools.base.tool.icmp_ping_host", fake_ping)
     hosts_data = {"empty-01": _make_host("empty-01", "", "eos", ["spine"])}
     monkeypatch_inventory(hosts_data, monkeypatch)
 
@@ -369,13 +459,13 @@ def test_nornir_ping_missing_hostname_fails_validation(
     assert outcome.success is False
     assert outcome.error is not None
     assert outcome.error.type == "validation"
-    mock_ping.assert_not_called()
+    assert calls == []
 
 
-@patch("nornir_mcp.tools.base.tool.icmp_ping_host")
-def test_nornir_ping_audit_record_execution_based(mock_ping: MagicMock) -> None:
+def test_nornir_ping_audit_record_execution_based(monkeypatch: pytest.MonkeyPatch) -> None:
     """Audit record is written with execution-based result and no raw ping output."""
-    mock_ping.return_value = (True, 15.0, None)
+    fake_ping, _ = _ping_stub((True, 15.0, None))
+    monkeypatch.setattr("nornir_mcp.tools.base.tool.icmp_ping_host", fake_ping)
 
     env = server._nornir_base.nornir_ping(ctx=_ctx())
     assert env.success is True
@@ -396,10 +486,10 @@ def test_nornir_ping_audit_record_execution_based(mock_ping: MagicMock) -> None:
     assert "Network is unreachable" not in payload
 
 
-@patch("nornir_mcp.tools.base.tool.icmp_ping_host")
-def test_nornir_ping_audit_details_exclude_raw_output(mock_ping: MagicMock) -> None:
+def test_nornir_ping_audit_details_exclude_raw_output(monkeypatch: pytest.MonkeyPatch) -> None:
     """Audit details never contain raw ping output."""
-    mock_ping.return_value = (False, None, "Raw ping stderr: unreachable")
+    fake_ping, _ = _ping_stub((False, None, "Raw ping stderr: unreachable"))
+    monkeypatch.setattr("nornir_mcp.tools.base.tool.icmp_ping_host", fake_ping)
 
     server._nornir_base.nornir_ping(ctx=_ctx())
 
@@ -408,27 +498,75 @@ def test_nornir_ping_audit_details_exclude_raw_output(mock_ping: MagicMock) -> N
     assert "Raw ping stderr" not in json.dumps(entry["details"])
 
 
-@patch("nornir_mcp.tools.base.tool.icmp_ping_host")
+def test_nornir_ping_audit_excludes_error_detail(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Audit metadata never carries the error_detail of unreachable outcomes."""
+    fake_ping, _ = _ping_stub((False, None, "ping command timed out"))
+    monkeypatch.setattr("nornir_mcp.tools.base.tool.icmp_ping_host", fake_ping)
+
+    server._nornir_base.nornir_ping(ctx=_ctx())
+
+    lines = audit.get_audit_logger().log_path.read_text("utf-8").strip().splitlines()
+    entry = json.loads(lines[0])
+    assert "ping command timed out" not in json.dumps(entry)
+    assert entry["details"]["unreachable_count"] == 2
+
+
 def test_nornir_ping_no_netmiko_invocation(
-    mock_ping: MagicMock, netmiko_fakes: list[dict[str, Any]]
+    monkeypatch: pytest.MonkeyPatch, netmiko_fakes: list[dict[str, Any]]
 ) -> None:
     """No Netmiko fake invocations occur during a ping."""
-    mock_ping.return_value = (True, 5.0, None)
+    fake_ping, _ = _ping_stub((True, 5.0, None))
+    monkeypatch.setattr("nornir_mcp.tools.base.tool.icmp_ping_host", fake_ping)
 
     server._nornir_base.nornir_ping(ctx=_ctx())
     assert netmiko_fakes == []
 
 
-def monkeypatch_inventory(hosts_data: dict[str, Any], monkeypatch: pytest.MonkeyPatch) -> None:
-    """Replace the fake Nornir inventory with a custom host map."""
+def test_nornir_ping_holds_execution_lock(monkeypatch: pytest.MonkeyPatch) -> None:
+    """nornir_ping runs its selection and probe loop under the execution lock."""
+    probe_thread_acquired: list[bool] = []
 
-    def mock_init(**_: object) -> FakeNornir:
-        return FakeNornir(FakeInventory(FakeHosts(hosts_data)))
+    def fake_ping(hostname: str, timeout_ms: int) -> tuple[bool, float | None, None]:
+        # The tool thread already holds EXECUTION_LOCK. RLock is reentrant in
+        # the same thread, so probe from a separate thread to prove the lock is
+        # held while the probe runs.
+        def _try_acquire() -> None:
+            acquired = EXECUTION_LOCK.acquire(blocking=False)
+            if acquired:
+                EXECUTION_LOCK.release()
+            probe_thread_acquired.append(acquired)
 
-    # String-based monkeypatch (mirrors conftest) so mypy does not flag the
-    # re-export; reset_nornir clears the cached singleton.
-    monkeypatch.setattr("nornir_mcp.core.runner.InitNornir", mock_init)
-    runner.reset_nornir()
+        thread = threading.Thread(target=_try_acquire)
+        thread.start()
+        thread.join()
+        return (True, 1.0, None)
+
+    monkeypatch.setattr("nornir_mcp.tools.base.tool.icmp_ping_host", fake_ping)
+
+    env = server._nornir_base.nornir_ping(name="spine-01", ctx=_ctx())
+    assert env.success is True
+    assert probe_thread_acquired == [False]
+
+
+def test_nornir_ping_unexpected_helper_error_isolated_per_host(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An unexpected icmp_ping_host exception fails that host, not the request."""
+
+    def fake_ping(hostname: str, timeout_ms: int) -> tuple[bool, float | None, str | None]:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr("nornir_mcp.tools.base.tool.icmp_ping_host", fake_ping)
+
+    env = server._nornir_base.nornir_ping(name="spine-01", ctx=_ctx())
+    outcome = env.results["spine-01"]
+    assert outcome.success is False
+    assert outcome.error is not None
+    assert outcome.error.type == "internal"
+    assert outcome.error.retryable is False
+    assert outcome.error.host == "spine-01"
+    assert "ping diagnostic failed unexpectedly" in outcome.error.message
+    assert "boom" in outcome.error.message
 
 
 # ---------------------------------------------------------------------------
@@ -472,6 +610,29 @@ def test_check_tcp_host_failure_returns_error_detail() -> None:
     assert latency_ms is None
     assert error is not None
     assert "Connection refused" in error
+
+
+def test_check_tcp_host_returns_failure_on_timeout_error() -> None:
+    """check_tcp_host treats TimeoutError as an expected, graceful failure."""
+
+    def fake_connector(addr: tuple[str, int], timeout: float) -> _FakeConn:
+        raise TimeoutError("timed out")
+
+    reachable, latency_ms, error = check_tcp_host("192.168.1.1", 22, 3000, fake_connector)
+    assert reachable is False
+    assert latency_ms is None
+    assert error is not None
+    assert "timed out" in error
+
+
+def test_check_tcp_host_propagates_unexpected_exceptions() -> None:
+    """Unexpected connector exceptions propagate instead of being swallowed."""
+
+    def fake_connector(addr: tuple[str, int], timeout: float) -> _FakeConn:
+        raise RuntimeError("boom")
+
+    with pytest.raises(RuntimeError, match="boom"):
+        check_tcp_host("192.168.1.1", 22, 3000, fake_connector)
 
 
 def test_check_tcp_host_invalid_hostname_propagates_validation_error() -> None:
@@ -531,10 +692,10 @@ def test_check_tcp_host_no_real_socket_io() -> None:
 # ---------------------------------------------------------------------------
 
 
-@patch("nornir_mcp.tools.base.tool.check_tcp_host")
-def test_nornir_ssh_check_reachable_host(mock_tcp: MagicMock) -> None:
+def test_nornir_ssh_check_reachable_host(monkeypatch: pytest.MonkeyPatch) -> None:
     """A reachable host returns success and structured data."""
-    mock_tcp.return_value = (True, 4.2, None)
+    fake_tcp, _ = _tcp_stub((True, 4.2, None))
+    monkeypatch.setattr("nornir_mcp.tools.base.tool.check_tcp_host", fake_tcp)
 
     env = server._nornir_base.nornir_ssh_check(name="spine-01", ctx=_ctx())
     assert env.success is True
@@ -550,24 +711,27 @@ def test_nornir_ssh_check_reachable_host(mock_tcp: MagicMock) -> None:
     assert data["latency_ms"] == 4.2
 
 
-@patch("nornir_mcp.tools.base.tool.check_tcp_host")
-def test_nornir_ssh_check_data_shape(mock_tcp: MagicMock) -> None:
+def test_nornir_ssh_check_data_shape(monkeypatch: pytest.MonkeyPatch) -> None:
     """Result data includes host, hostname, port, mode, reachable, latency_ms."""
-    mock_tcp.return_value = (True, 1.0, None)
+    fake_tcp, _ = _tcp_stub((True, 1.0, None))
+    monkeypatch.setattr("nornir_mcp.tools.base.tool.check_tcp_host", fake_tcp)
 
     env = server._nornir_base.nornir_ssh_check(name="leaf-01", ctx=_ctx())
     data = env.results["leaf-01"].data
     assert data is not None
     assert set(data) == {"host", "hostname", "port", "mode", "reachable", "latency_ms"}
+    assert "error_detail" not in data
     assert data["mode"] == "tcp"
     assert data["port"] == 22
     assert data["reachable"] is True
 
 
-@patch("nornir_mcp.tools.base.tool.check_tcp_host")
-def test_nornir_ssh_check_unreachable_success_when_flag_false(mock_tcp: MagicMock) -> None:
+def test_nornir_ssh_check_unreachable_success_when_flag_false(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Unreachable host with unreachable_as_error=False succeeds with reachable=False."""
-    mock_tcp.return_value = (False, None, "Connection refused")
+    fake_tcp, _ = _tcp_stub((False, None, "Connection refused"))
+    monkeypatch.setattr("nornir_mcp.tools.base.tool.check_tcp_host", fake_tcp)
 
     env = server._nornir_base.nornir_ssh_check(
         name="spine-01", unreachable_as_error=False, ctx=_ctx()
@@ -579,12 +743,15 @@ def test_nornir_ssh_check_unreachable_success_when_flag_false(mock_tcp: MagicMoc
     assert data is not None
     assert data["reachable"] is False
     assert data["latency_ms"] is None
+    assert data["error_detail"] == "Connection refused"
 
 
-@patch("nornir_mcp.tools.base.tool.check_tcp_host")
-def test_nornir_ssh_check_unreachable_error_when_flag_true(mock_tcp: MagicMock) -> None:
+def test_nornir_ssh_check_unreachable_error_when_flag_true(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Unreachable host with unreachable_as_error=True fails with connection error."""
-    mock_tcp.return_value = (False, None, "Connection refused")
+    fake_tcp, _ = _tcp_stub((False, None, "Connection refused"))
+    monkeypatch.setattr("nornir_mcp.tools.base.tool.check_tcp_host", fake_tcp)
 
     env = server._nornir_base.nornir_ssh_check(
         name="spine-01", unreachable_as_error=True, ctx=_ctx()
@@ -631,15 +798,13 @@ def test_nornir_ssh_check_empty_name_list() -> None:
     assert env.error.type == "validation"
 
 
-@patch("nornir_mcp.tools.base.tool.check_tcp_host")
-def test_nornir_ssh_check_platform_agnostic_junos(
-    mock_tcp: MagicMock, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_nornir_ssh_check_platform_agnostic_junos(monkeypatch: pytest.MonkeyPatch) -> None:
     """Platform-agnostic behavior works for unsupported platforms like junos."""
     hosts_data = {"mx-01": _make_host("mx-01", "192.168.2.1", "junos", ["core"])}
     monkeypatch_inventory(hosts_data, monkeypatch)
 
-    mock_tcp.return_value = (True, 3.3, None)
+    fake_tcp, _ = _tcp_stub((True, 3.3, None))
+    monkeypatch.setattr("nornir_mcp.tools.base.tool.check_tcp_host", fake_tcp)
     env = server._nornir_base.nornir_ssh_check(name="mx-01", ctx=_ctx())
     assert env.success is True
     data = env.results["mx-01"].data
@@ -648,21 +813,70 @@ def test_nornir_ssh_check_platform_agnostic_junos(
     assert data["mode"] == "tcp"
 
 
-@patch("nornir_mcp.tools.base.tool.check_tcp_host")
 def test_nornir_ssh_check_no_netmiko_invocation(
-    mock_tcp: MagicMock, netmiko_fakes: list[dict[str, Any]]
+    monkeypatch: pytest.MonkeyPatch, netmiko_fakes: list[dict[str, Any]]
 ) -> None:
     """No Netmiko fake invocations occur during an ssh check."""
-    mock_tcp.return_value = (True, 5.0, None)
+    fake_tcp, _ = _tcp_stub((True, 5.0, None))
+    monkeypatch.setattr("nornir_mcp.tools.base.tool.check_tcp_host", fake_tcp)
 
     server._nornir_base.nornir_ssh_check(ctx=_ctx())
     assert netmiko_fakes == []
 
 
-@patch("nornir_mcp.tools.base.tool.check_tcp_host")
-def test_nornir_ssh_check_audit_record_execution_based(mock_tcp: MagicMock) -> None:
+def test_nornir_ssh_check_holds_execution_lock(monkeypatch: pytest.MonkeyPatch) -> None:
+    """nornir_ssh_check runs its selection and probe loop under the execution lock."""
+    probe_thread_acquired: list[bool] = []
+
+    def fake_tcp(hostname: str, port: int, timeout_ms: int) -> tuple[bool, float | None, None]:
+        # The tool thread already holds EXECUTION_LOCK. RLock is reentrant in
+        # the same thread, so probe from a separate thread to prove the lock is
+        # held while the probe runs.
+        def _try_acquire() -> None:
+            acquired = EXECUTION_LOCK.acquire(blocking=False)
+            if acquired:
+                EXECUTION_LOCK.release()
+            probe_thread_acquired.append(acquired)
+
+        thread = threading.Thread(target=_try_acquire)
+        thread.start()
+        thread.join()
+        return (True, 1.0, None)
+
+    monkeypatch.setattr("nornir_mcp.tools.base.tool.check_tcp_host", fake_tcp)
+
+    env = server._nornir_base.nornir_ssh_check(name="spine-01", ctx=_ctx())
+    assert env.success is True
+    assert probe_thread_acquired == [False]
+
+
+def test_nornir_ssh_check_unexpected_helper_error_isolated_per_host(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An unexpected check_tcp_host exception fails that host, not the request."""
+
+    def fake_tcp(
+        hostname: str, port: int, timeout_ms: int
+    ) -> tuple[bool, float | None, str | None]:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr("nornir_mcp.tools.base.tool.check_tcp_host", fake_tcp)
+
+    env = server._nornir_base.nornir_ssh_check(name="spine-01", ctx=_ctx())
+    outcome = env.results["spine-01"]
+    assert outcome.success is False
+    assert outcome.error is not None
+    assert outcome.error.type == "internal"
+    assert outcome.error.retryable is False
+    assert outcome.error.host == "spine-01"
+    assert "ssh check diagnostic failed unexpectedly" in outcome.error.message
+    assert "boom" in outcome.error.message
+
+
+def test_nornir_ssh_check_audit_record_execution_based(monkeypatch: pytest.MonkeyPatch) -> None:
     """Audit record is written with execution-based result, no credentials."""
-    mock_tcp.return_value = (True, 15.0, None)
+    fake_tcp, _ = _tcp_stub((True, 15.0, None))
+    monkeypatch.setattr("nornir_mcp.tools.base.tool.check_tcp_host", fake_tcp)
 
     env = server._nornir_base.nornir_ssh_check(ctx=_ctx())
     assert env.success is True
@@ -685,46 +899,36 @@ def test_nornir_ssh_check_audit_record_execution_based(mock_tcp: MagicMock) -> N
     assert "Connection refused" not in payload
 
 
+def test_nornir_ssh_check_audit_excludes_error_detail(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Audit metadata never carries the error_detail of unreachable outcomes."""
+    fake_tcp, _ = _tcp_stub((False, None, "TCP connection failed: Connection refused"))
+    monkeypatch.setattr("nornir_mcp.tools.base.tool.check_tcp_host", fake_tcp)
+
+    server._nornir_base.nornir_ssh_check(ctx=_ctx())
+
+    lines = audit.get_audit_logger().log_path.read_text("utf-8").strip().splitlines()
+    entry = json.loads(lines[0])
+    assert "TCP connection failed" not in json.dumps(entry)
+    assert entry["details"]["unreachable_count"] == 2
+
+
 # ---------------------------------------------------------------------------
 # Additional coverage gaps
 # ---------------------------------------------------------------------------
 
 
-@patch("nornir_mcp.tools.base.tool.icmp_ping_host")
-def test_nornir_ping_missing_hostname_fails_validation_again(
-    mock_ping: MagicMock, monkeypatch: pytest.MonkeyPatch
+def test_nornir_ssh_check_list_name_targets_multiple_hosts(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Confirm the empty-hostname validation path is exercised for ping too."""
-    hosts_data = {"empty-02": _make_host("empty-02", "", "ios", ["core"])}
-    monkeypatch_inventory(hosts_data, monkeypatch)
-
-    env = server._nornir_base.nornir_ping(ctx=_ctx())
-    outcome = env.results["empty-02"]
-    assert outcome.success is False
-    assert outcome.error is not None
-    assert outcome.error.type == "validation"
-    mock_ping.assert_not_called()
-
-
-@patch("nornir_mcp.tools.base.tool.check_tcp_host")
-def test_nornir_ssh_check_list_name_targets_multiple_hosts(mock_tcp: MagicMock) -> None:
     """A list-valued name parameter targets all matching hosts."""
-    mock_tcp.return_value = (True, 1.1, None)
+    fake_tcp, _ = _tcp_stub((True, 1.1, None))
+    monkeypatch.setattr("nornir_mcp.tools.base.tool.check_tcp_host", fake_tcp)
 
     env = server._nornir_base.nornir_ssh_check(name=["spine-01", "leaf-01"], ctx=_ctx())
     assert env.success is True
     assert set(env.results) == {"spine-01", "leaf-01"}
     for h in env.results.values():
         assert h.success is True
-
-
-def test_nornir_ssh_check_invalid_port_zero() -> None:
-    """Port 0 is rejected at the request level."""
-    env = server._nornir_base.nornir_ssh_check(name="spine-01", port=0, ctx=_ctx())
-    assert env.success is False
-    assert env.error is not None
-    assert env.error.type == "validation"
-    assert "port" in env.error.message
 
 
 def test_nornir_ssh_check_invalid_port_65536() -> None:
@@ -735,10 +939,16 @@ def test_nornir_ssh_check_invalid_port_65536() -> None:
     assert env.error.type == "validation"
 
 
-@patch("nornir_mcp.tools.base.tool.check_tcp_host")
-def test_nornir_ssh_check_partial_audit(mock_tcp: MagicMock) -> None:
+def test_nornir_ssh_check_partial_audit(monkeypatch: pytest.MonkeyPatch) -> None:
     """With unreachable_as_error=True, one reachable + one unreachable => 'partial'."""
-    mock_tcp.side_effect = [(True, 5.0, None), (False, None, "Refused")]
+    results = iter([(True, 5.0, None), (False, None, "Refused")])
+
+    def fake_tcp(
+        hostname: str, port: int, timeout_ms: int
+    ) -> tuple[bool, float | None, str | None]:
+        return next(results)
+
+    monkeypatch.setattr("nornir_mcp.tools.base.tool.check_tcp_host", fake_tcp)
 
     env = server._nornir_base.nornir_ssh_check(unreachable_as_error=True, ctx=_ctx())
     assert env.results["spine-01"].success is True
@@ -752,10 +962,10 @@ def test_nornir_ssh_check_partial_audit(mock_tcp: MagicMock) -> None:
     assert entry["details"]["unreachable_count"] == 1
 
 
-@patch("nornir_mcp.tools.base.tool.check_tcp_host")
-def test_nornir_ssh_check_failed_audit(mock_tcp: MagicMock) -> None:
+def test_nornir_ssh_check_failed_audit(monkeypatch: pytest.MonkeyPatch) -> None:
     """With unreachable_as_error=True, all hosts unreachable => audit 'failed'."""
-    mock_tcp.return_value = (False, None, "Refused")
+    fake_tcp, _ = _tcp_stub((False, None, "Refused"))
+    monkeypatch.setattr("nornir_mcp.tools.base.tool.check_tcp_host", fake_tcp)
 
     env = server._nornir_base.nornir_ssh_check(unreachable_as_error=True, ctx=_ctx())
     assert env.success is False
@@ -769,13 +979,74 @@ def test_nornir_ssh_check_failed_audit(mock_tcp: MagicMock) -> None:
     assert entry["details"]["unreachable_count"] == 2
 
 
-@patch("nornir_mcp.tools.base.tool.check_tcp_host")
-def test_nornir_ping_list_name_targets_multiple_hosts(mock_ping: MagicMock) -> None:
+def test_nornir_ping_list_name_targets_multiple_hosts(monkeypatch: pytest.MonkeyPatch) -> None:
     """A list-valued name parameter targets all matching hosts."""
-    mock_ping.return_value = (True, 1.1, None)
+    fake_ping, _ = _ping_stub((True, 1.1, None))
+    monkeypatch.setattr("nornir_mcp.tools.base.tool.icmp_ping_host", fake_ping)
 
     env = server._nornir_base.nornir_ping(name=["spine-01", "leaf-01"], ctx=_ctx())
     assert env.success is True
     assert set(env.results) == {"spine-01", "leaf-01"}
     for h in env.results.values():
         assert h.success is True
+
+
+# ---------------------------------------------------------------------------
+# Envelope contract for the connectivity diagnostics
+# ---------------------------------------------------------------------------
+
+
+_CONNECTIVITY_TOOL_CALLS: list[
+    tuple[
+        str,
+        Callable[..., ToolEnvelope],
+        Callable[..., tuple[Any, Any]],
+        str,
+        set[str],
+    ]
+] = [
+    (
+        "nornir_ping",
+        server._nornir_base.nornir_ping,
+        _ping_stub,
+        "nornir_mcp.tools.base.tool.icmp_ping_host",
+        {"host", "hostname", "mode", "reachable", "latency_ms"},
+    ),
+    (
+        "nornir_ssh_check",
+        server._nornir_base.nornir_ssh_check,
+        _tcp_stub,
+        "nornir_mcp.tools.base.tool.check_tcp_host",
+        {"host", "hostname", "port", "mode", "reachable", "latency_ms"},
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    "tool_name, call_tool, stub_factory, helper_target, data_keys",
+    _CONNECTIVITY_TOOL_CALLS,
+    ids=[entry[0] for entry in _CONNECTIVITY_TOOL_CALLS],
+)
+def test_connectivity_tools_speak_envelope_contract(
+    monkeypatch: pytest.MonkeyPatch,
+    tool_name: str,
+    call_tool: Callable[..., ToolEnvelope],
+    stub_factory: Callable[..., tuple[Any, Any]],
+    helper_target: str,
+    data_keys: set[str],
+) -> None:
+    """nornir_ping and nornir_ssh_check speak the §21 ToolEnvelope contract."""
+    fake_helper, _ = stub_factory((True, 1.0, None))
+    monkeypatch.setattr(helper_target, fake_helper)
+
+    env = call_tool(ctx=_ctx())
+    assert isinstance(env, ToolEnvelope)
+    assert env.operation == tool_name
+    assert isinstance(env.request_id, str) and env.request_id
+    assert isinstance(env.results, dict)
+    assert env.results  # every inventory host was probed
+    for outcome in env.results.values():
+        assert isinstance(outcome, HostOutcome)
+        assert outcome.success is True
+        assert outcome.data is not None
+        assert set(outcome.data) == data_keys

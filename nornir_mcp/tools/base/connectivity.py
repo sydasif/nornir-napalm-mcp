@@ -7,6 +7,7 @@ checks that do not depend on Nornir or Netmiko.
 from __future__ import annotations
 
 import ipaddress
+import math
 import platform
 import re
 import socket
@@ -106,7 +107,7 @@ def build_ping_command(target: str, timeout_ms: int) -> list[str]:
     Args:
         target: The validated target hostname or IP address.
         timeout_ms: Requested timeout in milliseconds. The underlying ping
-            utilities have a **1-second effective minimum**: Linux rounds up
+            utilities have a **1-second effective minimum**: Linux ceil()s up
             to whole seconds, and Darwin has no native timeout flag (the
             subprocess-level backstop in ``icmp_ping_host`` enforces the real
             deadline). Callers should not expect sub-second control.
@@ -123,8 +124,9 @@ def build_ping_command(target: str, timeout_ms: int) -> list[str]:
         return ["ping", "-c", "1", target]
     else:
         # Linux and other Unix-like: ping -c 1 -W <timeout_sec> <target>
-        # Convert timeout_ms to seconds, minimum 1 second
-        timeout_sec = max(1, round(timeout_ms / 1000))
+        # Convert timeout_ms to seconds with ceil (never round down: a 500 ms
+        # request must not become a 0-second deadline); minimum 1 second.
+        timeout_sec = max(1, math.ceil(timeout_ms / 1000))
         return ["ping", "-c", "1", "-W", str(timeout_sec), target]
 
 
@@ -170,6 +172,10 @@ def icmp_ping_host(
 
     Raises:
         ValidationError: If the hostname fails validation.
+        Exception: Any unexpected exception raised by the runner propagates to
+            the caller; expected failures (``subprocess.TimeoutExpired``,
+            ``FileNotFoundError``, ``PermissionError``, and other ``OSError``
+            subclasses) return ``(False, None, error_detail)`` instead.
     """
     # Validate the target
     validated_target = validate_probe_target(hostname)
@@ -203,8 +209,8 @@ def icmp_ping_host(
         return (False, None, "ping executable not found")
     except PermissionError:
         return (False, None, "permission denied to execute ping")
-    except Exception as exc:  # pylint: disable=broad-except
-        return (False, None, f"unexpected error: {exc}")
+    except OSError as exc:
+        return (False, None, f"ping failed: {exc}")
     end_time = time.perf_counter()
 
     # Check the return code
@@ -237,8 +243,9 @@ def check_tcp_host(
     This is a server-originated reachability diagnostic. It opens a TCP
     connection (via ``socket.create_connection`` by default) and closes it
     immediately — it does NOT authenticate and does NOT execute any protocol
-    or CLI commands. It is safe against ordinary unreachable results: only
-    ``ValidationError`` propagates out of this function.
+    or CLI commands. Ordinary connection failures (``OSError``/``TimeoutError``)
+    return ``reachable=False`` with an ``error_detail``; unexpected exceptions
+    propagate to the caller.
 
     Args:
         hostname: The hostname or IP address to probe (will be validated).
@@ -274,8 +281,6 @@ def check_tcp_host(
         conn = connector((validated_target, port), timeout_sec)
     except (OSError, TimeoutError) as exc:
         return (False, None, f"TCP connection failed: {exc}")
-    except Exception as exc:  # pylint: disable=broad-except
-        return (False, None, f"unexpected error: {exc}")
     end_time = time.perf_counter()
 
     # Success: measure latency, close the connection, never leak the socket.
