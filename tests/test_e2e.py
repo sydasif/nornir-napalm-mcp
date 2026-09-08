@@ -41,6 +41,8 @@ FROZEN_TOOL_NAMES = {
     "nornir_list_backups",
     "nornir_apply_config",
     "nornir_save_config",
+    "nornir_ping",
+    "nornir_ssh_check",
 }
 
 
@@ -78,15 +80,15 @@ def _derived_success(env: dict[str, Any]) -> bool:
 
 
 @pytest.mark.anyio
-async def test_e2e_tool_registry_has_exactly_twelve_nornir_tools(
+async def test_e2e_tool_registry_has_exactly_fourteen_nornir_tools(
     netmiko_fakes: list[dict[str, Any]],
 ) -> None:
-    """The wire registry exposes exactly the 12 frozen nornir_* tools."""
+    """The wire registry exposes exactly the 14 frozen nornir_* tools."""
     async with Client(server.mcp) as client:
         tools = await client.list_tools()
         names = sorted(tool.name for tool in tools)
         assert names == sorted(FROZEN_TOOL_NAMES)
-        assert len(names) == 12
+        assert len(names) == 14
         assert all(name.startswith("nornir_") for name in names)
 
 
@@ -217,3 +219,52 @@ async def test_e2e_envelope_invariant_across_workflow(
                 f"'{name}' violated the §21 invariant: expected success={expected}, "
                 f"got error={env.get('error')}, results={env.get('results')}"
             )
+
+
+@pytest.mark.anyio
+async def test_e2e_nornir_ping_basic(
+    netmiko_fakes: list[dict[str, Any]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """nornir_ping targets one existing host and returns structured reachability data."""
+    # Fake the ping so no real ICMP traffic is generated; this is a server-
+    # originated connectivity diagnostic that must not touch netmiko.
+    monkeypatch.setattr(
+        "nornir_mcp.tools.base.tool.icmp_ping_host",
+        lambda hostname, timeout_ms: (True, 9.5, None),
+    )
+
+    async with Client(server.mcp) as client:
+        env = await _call(client, "nornir_ping", {"name": "spine-01"})
+        assert _derived_success(env)
+        data = env["results"]["spine-01"]["data"]
+        assert data["host"] == "spine-01"
+        assert data["hostname"] == "192.168.1.1"
+        assert data["mode"] == "icmp"
+        assert data["reachable"] is True
+        assert data["latency_ms"] == 9.5
+        assert netmiko_fakes == []
+
+
+@pytest.mark.anyio
+async def test_e2e_nornir_ssh_check_basic(
+    netmiko_fakes: list[dict[str, Any]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """nornir_ssh_check targets one host and returns structured TCP reachability data."""
+    # Fake the TCP check so no real sockets are opened; this is a server-
+    # originated reachability diagnostic that must not touch netmiko or SSH.
+    monkeypatch.setattr(
+        "nornir_mcp.tools.base.tool.check_tcp_host",
+        lambda hostname, port, timeout_ms: (True, 4.2, None),
+    )
+
+    async with Client(server.mcp) as client:
+        env = await _call(client, "nornir_ssh_check", {"name": "spine-01"})
+        assert _derived_success(env)
+        data = env["results"]["spine-01"]["data"]
+        assert data["host"] == "spine-01"
+        assert data["hostname"] == "192.168.1.1"
+        assert data["port"] == 22
+        assert data["mode"] == "tcp"
+        assert data["reachable"] is True
+        assert data["latency_ms"] == 4.2
+        assert netmiko_fakes == []

@@ -1,7 +1,7 @@
 """Nornir-NAPALM FastMCP Server — composition root.
 
 Tool definitions live in ``tools/{base,napalm,netmiko}/tool.py``; this file
-instantiates them and registers the resulting twelve bound methods on the
+instantiates them and registers the resulting fourteen bound methods on the
 MCP server. The CLI entry point is ``nornir_mcp.cli.main:main``.
 """
 
@@ -32,6 +32,8 @@ _TOOLS: tuple[Any, ...] = (
     _nornir_base.nornir_reload_inventory,
     _nornir_base.nornir_backup_config,
     _nornir_base.nornir_list_backups,
+    _nornir_base.nornir_ping,
+    _nornir_base.nornir_ssh_check,
     # napalm — read/getter tools
     _napalm_tools.nornir_get_facts,
     _napalm_tools.nornir_run_getter,
