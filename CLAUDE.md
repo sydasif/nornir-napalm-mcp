@@ -32,7 +32,7 @@ dependencies point down: `core` ← `tools/*` ← `server.py`.
 `NapalmTool (tools/napalm/tool.py)` / `NetmikoTool (tools/netmiko/tool.py)`.
 
 - `server.py` — composition root (~40 lines): instantiates the three classes,
-  registers the 12 bound methods on `mcp`, exports nothing tool-shaped. The
+  registers the 14 bound methods on `mcp`, exports nothing tool-shaped. The
   only module that knows FastMCP. Tests target the shared instances
   (`server._nornir_base`, `server._napalm_tools`, `server._netmiko_tools`)
   for direct-call identity (§6.1).
@@ -64,13 +64,21 @@ lock/cache (D7).
 
 ## Tool surface (frozen — do not change)
 
-Exactly 12 tools. Wire names are frozen by `FROZEN_TOOL_NAMES` in
+Exactly 14 tools. Wire names are frozen by `FROZEN_TOOL_NAMES` in
 `tests/test_e2e.py` (enforced by
-`test_e2e_tool_registry_has_exactly_twelve_nornir_tools`). Tool **method
+`test_e2e_tool_registry_has_exactly_fourteen_nornir_tools`). Tool **method
 names** equal the wire names, and FastMCP derives the JSON schema from the
 signature — preserve parameter names/order/defaults and docstrings verbatim.
 `ctx` differs by family: NAPALM tools take required `ctx: Context` first;
 netmiko tools take optional `ctx: Context | None = None` last — do not unify.
+
+The surface was explicitly extended in version 0.5.0 to add
+`nornir_ping` and `nornir_ssh_check`. Future tool additions or removals
+require explicit approval.
+
+`nornir_ping` and `nornir_ssh_check` are **server-originated** connectivity
+diagnostics: they use the Nornir inventory only for target selection and do
+**not** use Netmiko, Nornir task execution, or device CLI commands.
 
 | Spec tool              | Implementation        | Spec tool               | Implementation         |
 | ---------------------- | --------------------- | ----------------------- | ---------------------- |

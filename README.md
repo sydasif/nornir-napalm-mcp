@@ -25,24 +25,27 @@ Reads are free; **writes are gated**. `nornir_apply_config` (dry-run by default)
 
 ## Features
 
-| Tool                      | Description                                                                 |
-| ------------------------- | --------------------------------------------------------------------------- |
-| `nornir_list_inventory`   | List all devices with hostname, platform, and group membership              |
-| `nornir_get_facts`        | System facts: vendor, model, OS version, serial number                      |
-| `nornir_run_getter`       | Run any NAPALM getter by name (`arp_table`, `bgp_neighbors`, `vlans`, etc.) |
-| `nornir_get_config`       | Retrieve running and/or startup configuration from a device                 |
-| `nornir_list_getters`     | Introspect available NAPALM getters for each platform in the inventory      |
-| `nornir_reload_inventory` | Re-read YAML inventory from disk                                            |
-| `nornir_run_command`      | Run one read-only netmiko CLI command (READ_ONLY/SAFE_OPERATIONAL only, per device)  |
-| `nornir_run_commands`     | Run a batch of read-only netmiko CLI commands; rejected commands fail only themselves |
-| `nornir_backup_config`    | Capture and store the running config as an immutable backup (NAPALM, falling back to netmiko) |
-| `nornir_list_backups`     | List stored backups for a device, oldest first                              |
-| `nornir_apply_config`     | Plan (dry-run by default) and apply config lines via netmiko; pre-change backups are mandatory and fail-closed |
+| Tool                      | Description                                                                                                      |
+| ------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `nornir_list_inventory`   | List all devices with hostname, platform, and group membership                                                   |
+| `nornir_get_facts`        | System facts: vendor, model, OS version, serial number                                                           |
+| `nornir_run_getter`       | Run any NAPALM getter by name (`arp_table`, `bgp_neighbors`, `vlans`, etc.)                                      |
+| `nornir_get_config`       | Retrieve running and/or startup configuration from a device                                                      |
+| `nornir_list_getters`     | Introspect available NAPALM getters for each platform in the inventory                                           |
+| `nornir_reload_inventory` | Re-read YAML inventory from disk                                                                                 |
+| `nornir_run_command`      | Run one read-only netmiko CLI command (READ_ONLY/SAFE_OPERATIONAL only, per device)                              |
+| `nornir_run_commands`     | Run a batch of read-only netmiko CLI commands; rejected commands fail only themselves                            |
+| `nornir_backup_config`    | Capture and store the running config as an immutable backup (NAPALM, falling back to netmiko)                    |
+| `nornir_list_backups`     | List stored backups for a device, oldest first                                                                   |
+| `nornir_apply_config`     | Plan (dry-run by default) and apply config lines via netmiko; pre-change backups are mandatory and fail-closed   |
 | `nornir_save_config`      | Persist running config to startup/NVRAM via netmiko — explicit-only, never called implicitly by apply (spec §11) |
+| `nornir_ping`             | Server-originated ICMP ping from the MCP host to selected inventory devices                                      |
+| `nornir_ssh_check`        | Server-originated TCP reachability check against inventory hosts, default port 22                                |
 
 - **Writes are gated.** `nornir_apply_config` and `nornir_save_config` are the only write tools. Apply dry-runs by default, rejects DANGEROUS/BLOCKED lines per device, always captures a pre-change backup (fail-closed: a failed backup means the device is never touched), and reports transcript errors honestly. Saving to NVRAM is a separate, explicit, audited step.
 - **Lazy initialization** — server starts even with a broken inventory, exposing the tool catalogue for inspection.
 - **Singleton caching** — Nornir instance is initialized once and reused across requests. Failed-device quarantine (`failed_hosts`) is reset before every call so dropped devices are available again on the next request.
+- **Connectivity diagnostics** — `nornir_ping` checks ICMP reachability from the MCP server host, and `nornir_ssh_check` checks TCP reachability (default port 22) from the MCP server host. Neither tool logs into devices, executes CLI commands, or uses Netmiko; both use the Nornir inventory only as an address book for target selection.
 - **Flexible filtering** — filter by device name, group, or platform on any tool.
 - **HTTP and STDIO transport** — run locally for Claude Desktop or expose over HTTP.
 
@@ -50,14 +53,14 @@ Reads are free; **writes are gated**. `nornir_apply_config` (dry-run by default)
 
 Every CLI command routed through netmiko is classified into one of six categories per platform (`ios` / `eos` rulesets — anything else defaults to UNKNOWN and is denied):
 
-| Category | Read tools (`nornir_run_command*`) | Apply (`nornir_apply_config`) |
-| -------- | --------------------------------- | ----------------------------- |
-| `READ_ONLY` (`show …`) | ✅ allowed | allowed |
-| `SAFE_OPERATIONAL` (`ping`, `traceroute`) | ✅ allowed | allowed |
-| `CONFIGURATION` (`interface`, `ip route`, …) | ❌ rejected | ✅ allowed |
-| `UNKNOWN` | ❌ rejected (deny by default) | ✅ allowed (fails on-device if bad) |
-| `DANGEROUS` (`reload`) | ❌ rejected | ❌ rejected |
-| `BLOCKED` (`write erase`, `wr e`, …) | ❌ rejected | ❌ rejected |
+| Category                                     | Read tools (`nornir_run_command*`) | Apply (`nornir_apply_config`)       |
+| -------------------------------------------- | ---------------------------------- | ----------------------------------- |
+| `READ_ONLY` (`show …`)                       | ✅ allowed                         | allowed                             |
+| `SAFE_OPERATIONAL` (`ping`, `traceroute`)    | ✅ allowed                         | allowed                             |
+| `CONFIGURATION` (`interface`, `ip route`, …) | ❌ rejected                        | ✅ allowed                          |
+| `UNKNOWN`                                    | ❌ rejected (deny by default)      | ✅ allowed (fails on-device if bad) |
+| `DANGEROUS` (`reload`)                       | ❌ rejected                        | ❌ rejected                         |
+| `BLOCKED` (`write erase`, `wr e`, …)         | ❌ rejected                        | ❌ rejected                         |
 
 - Abbreviated forms (`wr e`, `conf t`, `rel`) are expanded before classification — abbreviated and full forms behave identically.
 - Newline/control-character injection is **structurally impossible**: multi-line input is rejected before any device is touched.
@@ -162,12 +165,12 @@ Register this server with any MCP client (Claude Desktop, VS Code, etc.) by addi
 
 ### Environment variables
 
-| Variable                    | Default        | Description                                    |
-| --------------------------- | -------------- | ---------------------------------------------- |
-| `NORNIR_CONFIG`             | — (required)   | Path to the Nornir bootstrap config            |
-| `NORNIR_MCP_BACKUP_DIR`     | `./backups`    | Root directory for immutable backups           |
-| `NORNIR_MCP_AUDIT_DIR`      | `./audit`      | Root directory for the append-only audit log   |
-| `NORNIR_MCP_MAX_OUTPUT_BYTES` | `65536`      | Per-output truncation budget (spec §21.1)      |
+| Variable                      | Default      | Description                                  |
+| ----------------------------- | ------------ | -------------------------------------------- |
+| `NORNIR_CONFIG`               | — (required) | Path to the Nornir bootstrap config          |
+| `NORNIR_MCP_BACKUP_DIR`       | `./backups`  | Root directory for immutable backups         |
+| `NORNIR_MCP_AUDIT_DIR`        | `./audit`    | Root directory for the append-only audit log |
+| `NORNIR_MCP_MAX_OUTPUT_BYTES` | `65536`      | Per-output truncation budget (spec §21.1)    |
 
 ---
 
@@ -247,9 +250,10 @@ nornir-mcp/
 │   │   ├── runner.py     # Nornir init, config loading, singleton caching, execution lock, NornirLike protocol
 │   │   └── tasks.py      # Task helpers: device filtering, execution, outcome normalization
 │   ├── tools/
-│   │   ├── base/         # NornirBase: engine-agnostic server tools (inventory, reload, backups)
-│   │   │   ├── tool.py   # NornirBase(CoreBase) — 4 server tools + InventoryDevice model
-│   │   │   └── capture.py # Config-capture service (NAPALM preferred, netmiko fallback)
+│   │   ├── base/         # NornirBase: engine-agnostic server tools (inventory, reload, backups, connectivity)
+│   │   │   ├── tool.py   # NornirBase(CoreBase) — 6 server tools + InventoryDevice model
+│   │   │   ├── capture.py # Config-capture service (NAPALM preferred, netmiko fallback)
+│   │   │   └── connectivity.py # Server-originated ICMP/TCP diagnostics (validate_probe_target, build_ping_command, icmp_ping_host, check_tcp_host)
 │   │   ├── napalm/       # NapalmTool: NAPALM-family tools
 │   │   │   ├── tool.py   # NapalmTool(NornirBase) — 4 NAPALM tools
 │   │   │   └── introspection.py # NAPALM getter discovery per platform (GetterInfo)
@@ -262,9 +266,10 @@ nornir-mcp/
 │   ├── core/             # Kernel unit tests (envelope, errors, policy, capability, storage, audit, tasks, runner, locking)
 │   ├── tools/
 │   │   ├── base/test_tool.py       # NornirBase tools (inventory, reload, backups)
+│   │   ├── base/test_connectivity.py # nornir_ping / nornir_ssh_check helpers + tool tests
 │   │   ├── napalm/                 # NapalmTool tools + getter introspection
 │   │   └── netmiko/               # NetmikoTool tools + change planning / transcript parsing
-│   ├── test_e2e.py       # Full-stack tests through the MCP protocol layer + 12-tool surface pin
+│   ├── test_e2e.py       # Full-stack tests through the MCP protocol layer + 14-tool surface pin
 │   └── test_cli.py       # CLI entry points
 ├── config.example.yaml   # Example Nornir configuration
 ├── pyproject.toml        # Build config, dependencies, and tool settings
