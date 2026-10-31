@@ -103,8 +103,9 @@ class FakeNornir:
 
     def filter(
         self,
-        name: str | None = None,
+        *,
         filter_func: Any = None,
+        name: str | list[str] | None = None,
         platform: str | None = None,
     ) -> FakeNornir:
         """Filter hosts by name, filter_func, or platform."""
@@ -114,8 +115,8 @@ class FakeNornir:
             filtered = {k: v for k, v in filtered.items() if filter_func(v)}
 
         if name is not None:
-            host = filtered.get(name)
-            filtered = {name: host} if host else {}
+            names = {name} if isinstance(name, str) else set(name)
+            filtered = {k: v for k, v in filtered.items() if k in names}
 
         if platform is not None:
             filtered = {k: v for k, v in filtered.items() if v.platform == platform}

@@ -74,17 +74,15 @@ class NornirLike(Protocol):
         self,
         *,
         filter_func: Any = None,  # noqa: ARG002
+        name: str | list[str] | None = None,
         platform: str | None = None,
     ) -> NornirLike:
         """Return a new instance containing only matching devices.
 
         Args:
-            filter_func: Callable that receives a host and returns whether it
-                matches.
-            platform: Only keep hosts with this platform.
-
-        Returns:
-            A new instance with only the matching devices.
+            filter_func: Callable that receives a host and returns whether it matches.
+            name: Device name or list of names to filter by.
+            platform: Only keep hosts with this platform (e.g., "ios", "eos").
         """
         ...
 
