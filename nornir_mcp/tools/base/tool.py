@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from fastmcp import Context
 from pydantic import BaseModel, ConfigDict
 
@@ -144,18 +146,11 @@ class NornirBase(CoreBase):
                     },
                 )
 
-        successes = sum(1 for o in outcomes.values() if o.success)
-        if successes == len(outcomes):
-            result = "success"
-        elif successes == 0:
-            result = "failed"
-        else:
-            result = "partial"
         get_audit_logger().record(
             operation,
             request_id,
             hosts=list(outcomes),
-            result=result,
+            result=self._audit_result(outcomes),
             details={"sha256": shas},
         )
         return ToolEnvelope(operation=operation, request_id=request_id, results=outcomes)
@@ -233,135 +228,19 @@ class NornirBase(CoreBase):
                 f"timeout_ms must be between 100 and 10000, got {timeout_ms}",
             )
 
-        outcomes: dict[str, HostOutcome] = {}
-        reachable_count = 0
-        unreachable_count = 0
-        invalid_count = 0
-
-        # Selection and probing touch the shared Nornir singleton
-        # (nr.data.reset_failed_hosts() in _select_targets), so they run under
-        # the global execution lock — FastMCP may execute sync tools in a
-        # threadpool, and the lock serializes access to Nornir's GlobalState.
-        with execution_lock():
-            error, targets = self._select_targets(operation, request_id, name, group, platform)
-            if error is not None:
-                return error
-            assert targets is not None
-
-            for host in targets.inventory.hosts.values():
-                hostname = host.name
-                target_hostname = str(host.hostname).strip() if host.hostname else ""
-
-                # Validate the hostname from inventory
-                if not target_hostname:
-                    outcomes[hostname] = HostOutcome(
-                        success=False,
-                        error=StructuredError(
-                            type="validation",
-                            message="Host inventory hostname is empty",
-                            host=hostname,
-                            operation=operation,
-                            retryable=False,
-                        ),
-                    )
-                    invalid_count += 1
-                    continue
-
-                try:
-                    validated_target = validate_probe_target(target_hostname)
-                except ValidationError as exc:
-                    outcomes[hostname] = HostOutcome(
-                        success=False,
-                        error=StructuredError(
-                            type="validation",
-                            message=str(exc),
-                            host=hostname,
-                            operation=operation,
-                            retryable=False,
-                        ),
-                    )
-                    invalid_count += 1
-                    continue
-
-                # Perform the ping; isolate unexpected helper failures per host
-                # so one bad probe never hides the others or crashes the request.
-                try:
-                    reachable, latency_ms, error_detail = icmp_ping_host(
-                        validated_target, timeout_ms
-                    )
-                except Exception as exc:  # noqa: BLE001 — per-host isolation
-                    outcomes[hostname] = HostOutcome(
-                        success=False,
-                        error=StructuredError(
-                            type="internal",
-                            message=f"ping diagnostic failed unexpectedly: {exc}",
-                            host=hostname,
-                            operation=operation,
-                            retryable=False,
-                        ),
-                    )
-                    continue
-
-                if reachable:
-                    reachable_count += 1
-                    outcomes[hostname] = HostOutcome(
-                        success=True,
-                        data={
-                            "host": hostname,
-                            "hostname": validated_target,
-                            "mode": "icmp",
-                            "reachable": True,
-                            "latency_ms": latency_ms,
-                        },
-                    )
-                else:
-                    unreachable_count += 1
-                    if unreachable_as_error:
-                        outcomes[hostname] = HostOutcome(
-                            success=False,
-                            error=StructuredError(
-                                type="connection",
-                                message=error_detail or "Host unreachable",
-                                host=hostname,
-                                operation=operation,
-                                retryable=True,
-                            ),
-                        )
-                    else:
-                        outcome_data: dict[str, object] = {
-                            "host": hostname,
-                            "hostname": validated_target,
-                            "mode": "icmp",
-                            "reachable": False,
-                            "latency_ms": None,
-                        }
-                        if error_detail is not None:
-                            outcome_data["error_detail"] = error_detail
-                        outcomes[hostname] = HostOutcome(success=True, data=outcome_data)
-
-        # Determine audit result based on host outcome success (not reachability)
-        successes = sum(1 for o in outcomes.values() if o.success)
-        if successes == len(outcomes):
-            result = "success"
-        elif successes == 0:
-            result = "failed"
-        else:
-            result = "partial"
-
-        get_audit_logger().record(
+        return self._probe_hosts(
             operation,
             request_id,
-            hosts=list(outcomes.keys()),
-            result=result,
-            details={
-                "mode": "icmp",
-                "reachable_count": reachable_count,
-                "unreachable_count": unreachable_count,
-                "invalid_count": invalid_count,
-            },
+            name,
+            group,
+            platform,
+            lambda target: icmp_ping_host(target, timeout_ms),
+            unreachable_as_error=unreachable_as_error,
+            mode="icmp",
+            diagnostic="ping",
+            data_extra={},
+            audit_extra={"mode": "icmp"},
         )
-
-        return ToolEnvelope(operation=operation, request_id=request_id, results=outcomes)
 
     def nornir_ssh_check(
         self,
@@ -416,15 +295,41 @@ class NornirBase(CoreBase):
                 f"timeout_ms must be between 100 and 10000, got {timeout_ms}",
             )
 
+        return self._probe_hosts(
+            operation,
+            request_id,
+            name,
+            group,
+            platform,
+            lambda target: check_tcp_host(target, port, timeout_ms),
+            unreachable_as_error=unreachable_as_error,
+            mode="tcp",
+            diagnostic="ssh check",
+            data_extra={"port": port},
+            audit_extra={"port": port, "mode": "tcp"},
+        )
+
+    def _probe_hosts(
+        self,
+        operation: str,
+        request_id: str,
+        name: str | list[str] | None,
+        group: str | None,
+        platform: str | None,
+        probe: Callable[[str], tuple[bool, float | None, str | None]],
+        *,
+        unreachable_as_error: bool,
+        mode: str,
+        diagnostic: str,
+        data_extra: dict[str, object],
+        audit_extra: dict[str, object],
+    ) -> ToolEnvelope:
+        """Shared server-originated probe loop for nornir_ping/nornir_ssh_check."""
         outcomes: dict[str, HostOutcome] = {}
         reachable_count = 0
         unreachable_count = 0
         invalid_count = 0
 
-        # Selection and probing touch the shared Nornir singleton
-        # (nr.data.reset_failed_hosts() in _select_targets), so they run under
-        # the global execution lock — FastMCP may execute sync tools in a
-        # threadpool, and the lock serializes access to Nornir's GlobalState.
         with execution_lock():
             error, targets = self._select_targets(operation, request_id, name, group, platform)
             if error is not None:
@@ -435,7 +340,6 @@ class NornirBase(CoreBase):
                 hostname = host.name
                 target_hostname = str(host.hostname).strip() if host.hostname else ""
 
-                # Validate the hostname from inventory
                 if not target_hostname:
                     outcomes[hostname] = HostOutcome(
                         success=False,
@@ -466,18 +370,14 @@ class NornirBase(CoreBase):
                     invalid_count += 1
                     continue
 
-                # Perform the TCP reachability check (no auth, no CLI); isolate
-                # unexpected helper failures per host.
                 try:
-                    reachable, latency_ms, error_detail = check_tcp_host(
-                        validated_target, port, timeout_ms
-                    )
+                    reachable, latency_ms, error_detail = probe(validated_target)
                 except Exception as exc:  # noqa: BLE001 — per-host isolation
                     outcomes[hostname] = HostOutcome(
                         success=False,
                         error=StructuredError(
                             type="internal",
-                            message=f"ssh check diagnostic failed unexpectedly: {exc}",
+                            message=f"{diagnostic} diagnostic failed unexpectedly: {exc}",
                             host=hostname,
                             operation=operation,
                             retryable=False,
@@ -492,10 +392,10 @@ class NornirBase(CoreBase):
                         data={
                             "host": hostname,
                             "hostname": validated_target,
-                            "port": port,
-                            "mode": "tcp",
+                            "mode": mode,
                             "reachable": True,
                             "latency_ms": latency_ms,
+                            **data_extra,
                         },
                     )
                 else:
@@ -515,32 +415,22 @@ class NornirBase(CoreBase):
                         outcome_data: dict[str, object] = {
                             "host": hostname,
                             "hostname": validated_target,
-                            "port": port,
-                            "mode": "tcp",
+                            "mode": mode,
                             "reachable": False,
                             "latency_ms": None,
+                            **data_extra,
                         }
                         if error_detail is not None:
                             outcome_data["error_detail"] = error_detail
                         outcomes[hostname] = HostOutcome(success=True, data=outcome_data)
 
-        # Determine audit result based on host outcome success (not reachability)
-        successes = sum(1 for o in outcomes.values() if o.success)
-        if successes == len(outcomes):
-            result = "success"
-        elif successes == 0:
-            result = "failed"
-        else:
-            result = "partial"
-
         get_audit_logger().record(
             operation,
             request_id,
             hosts=list(outcomes.keys()),
-            result=result,
+            result=self._audit_result(outcomes),
             details={
-                "port": port,
-                "mode": "tcp",
+                **audit_extra,
                 "reachable_count": reachable_count,
                 "unreachable_count": unreachable_count,
                 "invalid_count": invalid_count,

@@ -22,6 +22,7 @@ from typing import Any
 from fastmcp import Context
 
 from nornir_mcp.core.envelope import (
+    HostOutcome,
     StructuredError,
     ToolEnvelope,
 )
@@ -132,3 +133,13 @@ class CoreBase:
             message = exc.message if isinstance(exc, ValidationError) else str(exc)
             return self._validation_envelope(operation, request_id, message), None
         return None, targets
+
+    @staticmethod
+    def _audit_result(outcomes: dict[str, HostOutcome]) -> str:
+        """Collapse per-host outcomes into the audit ``result`` label."""
+        successes = sum(1 for outcome in outcomes.values() if outcome.success)
+        if successes == len(outcomes):
+            return "success"
+        if successes == 0:
+            return "failed"
+        return "partial"

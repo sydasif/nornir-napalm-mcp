@@ -186,12 +186,9 @@ class NetmikoTool(NornirBase):
         for host in targets.inventory.hosts.values():
             hostname = host.name
             plat = str(host.platform)
-            try:
-                netmiko_device_type(plat)
-            except UnsupportedOperationError as exc:
-                outcomes[hostname] = outcome_from_mcp_error(
-                    UnsupportedOperationError(exc.message, host=hostname, operation=operation)
-                )
+            gate = self._capability_gate(hostname, plat, operation)
+            if gate is not None:
+                outcomes[hostname] = gate
                 continue
             platform_hosts.setdefault(plat, []).append(hostname)
 
@@ -404,19 +401,12 @@ class NetmikoTool(NornirBase):
             else:
                 outcomes[hostname] = HostOutcome(success=True, data=data)
 
-        successes = sum(1 for outcome in outcomes.values() if outcome.success)
-        if successes == len(outcomes):
-            result = "success"
-        elif successes == 0:
-            result = "failed"
-        else:
-            result = "partial"
         audit.record(
             operation,
             request_id,
             change_id=plan.change_id,
             hosts=list(outcomes),
-            result=result,
+            result=self._audit_result(outcomes),
             details={"sha256": joined_hash},
         )
         return ToolEnvelope(operation=operation, request_id=request_id, results=outcomes)
@@ -460,12 +450,9 @@ class NetmikoTool(NornirBase):
         capable: list[str] = []
         for host in targets.inventory.hosts.values():
             hostname = host.name
-            try:
-                netmiko_device_type(str(host.platform))
-            except UnsupportedOperationError as exc:
-                outcomes[hostname] = outcome_from_mcp_error(
-                    UnsupportedOperationError(exc.message, host=hostname, operation=operation)
-                )
+            gate = self._capability_gate(hostname, str(host.platform), operation)
+            if gate is not None:
+                outcomes[hostname] = gate
             else:
                 capable.append(hostname)
 
@@ -478,18 +465,11 @@ class NetmikoTool(NornirBase):
                 )
             )
 
-        successes = sum(1 for outcome in outcomes.values() if outcome.success)
-        if successes == len(outcomes):
-            result = "success"
-        elif successes == 0:
-            result = "failed"
-        else:
-            result = "partial"
         get_audit_logger().record(
             operation,
             request_id,
             hosts=list(outcomes),
-            result=result,
+            result=self._audit_result(outcomes),
         )
         return ToolEnvelope(operation=operation, request_id=request_id, results=outcomes)
 
@@ -497,6 +477,20 @@ class NetmikoTool(NornirBase):
     # Private helpers (moved from server.py; reused by both run_command and
     # run_commands; these are *not* MCP tools.)
     # -----------------------------------------------------------------------
+
+    def _capability_gate(self, hostname: str, platform: str, operation: str) -> HostOutcome | None:
+        """Per-host platform capability gate for CLI tools.
+
+        Returns ``None`` when the platform has a netmiko device_type mapping,
+        otherwise a failed HostOutcome carrying ``unsupported_operation``.
+        """
+        try:
+            netmiko_device_type(platform)
+        except UnsupportedOperationError as exc:
+            return outcome_from_mcp_error(
+                UnsupportedOperationError(exc.message, host=hostname, operation=operation)
+            )
+        return None
 
     def _gate_host(
         self, command: str, hostname: str, platform: str, operation: str
@@ -508,12 +502,9 @@ class NetmikoTool(NornirBase):
         device_type mapping, ``command_rejected`` when the command is not
         READ_ONLY/SAFE_OPERATIONAL (the category is in the message).
         """
-        try:
-            netmiko_device_type(platform)
-        except UnsupportedOperationError as exc:
-            return outcome_from_mcp_error(
-                UnsupportedOperationError(exc.message, host=hostname, operation=operation)
-            )
+        gate = self._capability_gate(hostname, platform, operation)
+        if gate is not None:
+            return gate
         try:
             assert_read_allowed(command, platform)
         except CommandRejectedError as exc:
