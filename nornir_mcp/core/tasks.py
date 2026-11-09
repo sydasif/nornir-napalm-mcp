@@ -47,6 +47,8 @@ def _filter_devices(
         names = {name} if isinstance(name, str) and name else set(name)
         if not names:
             raise ValidationError("explicitly empty device list provided")
+        # Nornir 3.5.0 gotcha: nr.filter(name__in=[...]) silently returns an
+        # empty inventory; filter_func is the reliable host-match path.
         nr = nr.filter(filter_func=lambda h: h.name in names)
     if group:
         nr = nr.filter(filter_func=lambda h: any(g.name == group for g in h.groups))

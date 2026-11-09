@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Callable
 from typing import Any
 
 from fastmcp import Context
@@ -111,22 +112,15 @@ class NetmikoTool(NornirBase):
         if error is not None:
             return error
         assert targets is not None
+        outcomes, allowed_hosts = self._gate_hosts(
+            targets, lambda host, plat: self._gate_host(command, host, plat, operation)
+        )
 
-        outcomes: dict[str, HostOutcome] = {}
-        allowed: list[str] = []
-        for host in targets.inventory.hosts.values():
-            hostname = host.name
-            gate = self._gate_host(command, hostname, str(host.platform), operation)
-            if gate is not None:
-                outcomes[hostname] = gate
-            else:
-                allowed.append(hostname)
-
-        if allowed:
+        if allowed_hosts:
             executed = run_nornir_task(
                 netmiko_send_command,
                 operation=operation,
-                name=allowed,
+                name=[hostname for hostname, _ in allowed_hosts],
                 command_string=command,
             )
             outcomes.update(self._truncated_outputs(executed, command))
@@ -180,22 +174,16 @@ class NetmikoTool(NornirBase):
         if error is not None:
             return error
         assert targets is not None
-
-        outcomes: dict[str, HostOutcome] = {}
+        outcomes, allowed_hosts = self._gate_hosts(
+            targets, lambda host, plat: self._capability_gate(host, plat, operation)
+        )
         platform_hosts: dict[str, list[str]] = {}
-        for host in targets.inventory.hosts.values():
-            hostname = host.name
-            plat = str(host.platform)
-            gate = self._capability_gate(hostname, plat, operation)
-            if gate is not None:
-                outcomes[hostname] = gate
-                continue
+        for hostname, plat in allowed_hosts:
             platform_hosts.setdefault(plat, []).append(hostname)
-
         for plat, hostnames in platform_hosts.items():
-            allowed, rejected = self._gate_commands(commands, plat)
+            allowed_cmds, rejected = self._gate_commands(commands, plat)
             rejected_map = {cmd: {"error": reason} for cmd, reason in rejected.items()}
-            if not allowed:
+            if not allowed_cmds:
                 for hostname in hostnames:
                     outcomes[hostname] = HostOutcome(
                         success=False,
@@ -217,7 +205,7 @@ class NetmikoTool(NornirBase):
                 netmiko_send_commands,
                 operation=operation,
                 name=hostnames,
-                commands=allowed,
+                commands=allowed_cmds,
             )
             for hostname in hostnames:
                 run_outcome = executed.get(hostname)
@@ -239,7 +227,7 @@ class NetmikoTool(NornirBase):
                         error=run_error,
                     )
                     continue
-                cmd_outputs = self._truncated_command_outputs(run_outcome.data, allowed)
+                cmd_outputs = self._truncated_command_outputs(run_outcome.data, allowed_cmds)
                 outcomes[hostname] = HostOutcome(
                     success=True,
                     data={"commands": cmd_outputs, "rejected": rejected_map},
@@ -445,16 +433,10 @@ class NetmikoTool(NornirBase):
         if error is not None:
             return error
         assert targets is not None
-
-        outcomes: dict[str, HostOutcome] = {}
-        capable: list[str] = []
-        for host in targets.inventory.hosts.values():
-            hostname = host.name
-            gate = self._capability_gate(hostname, str(host.platform), operation)
-            if gate is not None:
-                outcomes[hostname] = gate
-            else:
-                capable.append(hostname)
+        outcomes, allowed_hosts = self._gate_hosts(
+            targets, lambda host, plat: self._capability_gate(host, plat, operation)
+        )
+        capable = [hostname for hostname, _ in allowed_hosts]
 
         if capable:
             outcomes.update(
@@ -531,6 +513,29 @@ class NetmikoTool(NornirBase):
                 continue
             allowed.append(command)
         return allowed, rejected
+
+    def _gate_hosts(
+        self,
+        targets: Any,
+        gate: Callable[[str, str], HostOutcome | None],
+    ) -> tuple[dict[str, HostOutcome], list[tuple[str, str]]]:
+        """Gate every host in *targets* with *gate*.
+
+        Returns ``(outcomes, allowed)``: *outcomes* maps each rejected
+        hostname to its failure HostOutcome; *allowed* is the ordered
+        ``(hostname, platform)`` pairs that passed.
+        """
+        outcomes: dict[str, HostOutcome] = {}
+        allowed: list[tuple[str, str]] = []
+        for host in targets.inventory.hosts.values():
+            hostname = host.name
+            platform = str(host.platform)
+            gate_outcome = gate(hostname, platform)
+            if gate_outcome is not None:
+                outcomes[hostname] = gate_outcome
+            else:
+                allowed.append((hostname, platform))
+        return outcomes, allowed
 
     def _truncated_command_outputs(
         self, raw_map: Any, commands: list[str]
