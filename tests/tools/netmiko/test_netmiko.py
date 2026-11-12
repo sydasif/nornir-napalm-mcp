@@ -302,6 +302,7 @@ def test_apply_error_transcript_reports_failure_not_success(
         ["interface Ethernet1"], dry_run=False, ctx=_ctx()
     )
     assert env.success is False
+    assert env.error is None
     spine = env.results["spine-01"]
     assert spine.success is False
     assert spine.error is not None
