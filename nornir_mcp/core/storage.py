@@ -24,6 +24,7 @@ from __future__ import annotations
 import hashlib
 import os
 import re
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from functools import cache
 from pathlib import Path
@@ -38,6 +39,17 @@ from nornir_mcp.core.errors import ValidationError
 _SAFE_IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 _DEFAULT_BACKUP_DIR = "backups"
+
+
+def _validate_identifier(value: str) -> None:
+    """Validate a host/backup identifier against path-traversal (spec §19)."""
+    if not _SAFE_IDENTIFIER.fullmatch(value):
+        raise ValidationError(
+            f"invalid host/backup identifier '{value}': must match "
+            r"^[A-Za-z0-9][A-Za-z0-9._-]*$ (no '..', separators, or absolute paths)"
+        )
+
+
 _ENV_BACKUP_DIR = "NORNIR_MCP_BACKUP_DIR"
 
 
@@ -76,6 +88,110 @@ def _build_backup_record(
         sha256=sha256,
         size=size,
     )
+
+
+@dataclass(frozen=True)
+class _PlannedBackup:
+    """Pure description of a backup write: validation + paths, no I/O.
+
+    Separating planning from writing lets tests freeze the clock and assert
+    on the planned record without touching the filesystem.
+    """
+
+    host: str
+    content_bytes: bytes
+    now: datetime
+    backup_id: str
+    cfg_path: Path
+    meta_path: Path
+    record: BackupRecord
+    sha256: str
+    size: int
+
+
+def _backup_cfg_path(root: Path, host: str, backup_id: str) -> Path:
+    return root / host / f"{backup_id}.cfg"
+
+
+def _backup_meta_path(root: Path, host: str, backup_id: str) -> Path:
+    return root / host / f"{backup_id}.meta.json"
+
+
+def plan_backup_write(
+    host: str,
+    content: str,
+    *,
+    trigger: Literal["standalone", "pre_change"],
+    change_id: str | None = None,
+    now: datetime | None = None,
+    root: Path | None = None,
+) -> _PlannedBackup:
+    """Plan an immutable backup write from pure inputs (no I/O).
+
+    Validates identifiers, derives paths, and builds the BackupRecord, but
+    does not touch the filesystem. *now* defaults to the current UTC time;
+    *root* defaults to ``NORNIR_MCP_BACKUP_DIR`` (or ``./backups``).
+    """
+    _validate_identifier(host)
+    if trigger not in ("standalone", "pre_change"):
+        raise ValidationError(f"invalid backup trigger '{trigger}'")
+
+    content_bytes = content.encode("utf-8")
+    now = now if now is not None else _now_utc()
+    backup_id = _generate_backup_id(now)
+    root = root if root is not None else Path(os.environ.get(_ENV_BACKUP_DIR, _DEFAULT_BACKUP_DIR))
+    cfg_path = _backup_cfg_path(root, host, backup_id)
+    meta_path = _backup_meta_path(root, host, backup_id)
+
+    sha256 = _calculate_sha256(content_bytes)
+    size = len(content_bytes)
+    record = _build_backup_record(
+        host=host,
+        now=now,
+        trigger=trigger,
+        change_id=change_id,
+        cfg_path=cfg_path,
+        sha256=sha256,
+        size=size,
+    )
+    return _PlannedBackup(
+        host=host,
+        content_bytes=content_bytes,
+        now=now,
+        backup_id=backup_id,
+        cfg_path=cfg_path,
+        meta_path=meta_path,
+        record=record,
+        sha256=sha256,
+        size=size,
+    )
+
+
+def _write_new(path: Path, payload: bytes) -> None:
+    """Create *path* exclusively with mode 0600; never overwrite."""
+    try:
+        fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError as exc:
+        raise ValidationError(
+            f"refusing to overwrite existing backup file '{path}' — backups are immutable"
+        ) from exc
+    with os.fdopen(fd, "wb") as fh:
+        fh.write(payload)
+
+
+def write_backup_files(plan: _PlannedBackup) -> BackupRecord:
+    """Persist a planned backup: create dirs, then exclusive 0600 files.
+
+    O_EXCL enforces immutability — an existing backup is never overwritten.
+    """
+    host_dir = plan.cfg_path.parent
+    root = host_dir.parent
+    os.makedirs(root, mode=0o700, exist_ok=True)
+    os.makedirs(host_dir, mode=0o700, exist_ok=True)
+
+    _write_new(plan.cfg_path, plan.content_bytes)
+    _write_new(plan.meta_path, plan.record.model_dump_json().encode("utf-8"))
+    return plan.record
 
 
 class BackupRecord(BaseModel):
@@ -118,11 +234,7 @@ class FilesystemBackupStore:
 
     @staticmethod
     def _validate_identifier(value: str) -> None:
-        if not _SAFE_IDENTIFIER.fullmatch(value):
-            raise ValidationError(
-                f"invalid host/backup identifier '{value}': must match "
-                r"^[A-Za-z0-9][A-Za-z0-9._-]*$ (no '..', separators, or absolute paths)"
-            )
+        _validate_identifier(value)
 
     # -- public API --------------------------------------------------------
 
@@ -149,36 +261,16 @@ class FilesystemBackupStore:
             ValidationError: For unsafe host names, or if the target file
                 already exists (backups are immutable — never overwritten).
         """
-        self._validate_identifier(host)
-        if trigger not in ("standalone", "pre_change"):
-            raise ValidationError(f"invalid backup trigger '{trigger}'")
-
-        content_bytes = content.encode("utf-8")
-        now = _now_utc()
-        backup_id = _generate_backup_id(now)
-        cfg_path = self.root / host / f"{backup_id}.cfg"
-        meta_path = self.root / host / f"{backup_id}.meta.json"
-
-        host_dir = cfg_path.parent
-        os.makedirs(self.root, mode=0o700, exist_ok=True)
-        os.makedirs(host_dir, mode=0o700, exist_ok=True)
-
-        sha256 = _calculate_sha256(content_bytes)
-        size = len(content_bytes)
-        record = _build_backup_record(
+        # Pure plan: validation, ids, paths, record — no I/O yet.
+        plan = plan_backup_write(
             host=host,
-            now=now,
+            content=content,
             trigger=trigger,
             change_id=change_id,
-            cfg_path=cfg_path,
-            sha256=sha256,
-            size=size,
+            root=self.root,
         )
-
-        # O_EXCL enforces immutability: never open an existing file.
-        self._write_new(cfg_path, content_bytes)
-        self._write_new(meta_path, record.model_dump_json().encode("utf-8"))
-        return record
+        # Effect: create dirs, then write exclusive 0600 files (never overwrite).
+        return write_backup_files(plan)
 
     def list(self, host: str) -> list[BackupRecord]:
         """Return this host's backups, oldest first."""
@@ -194,20 +286,6 @@ class FilesystemBackupStore:
                 # A torn/corrupt sidecar must not hide the other backups.
                 continue
         return records
-
-    # -- internals ---------------------------------------------------------
-
-    @staticmethod
-    def _write_new(path: Path, payload: bytes) -> None:
-        """Create *path* exclusively with mode 0600; never overwrite."""
-        try:
-            fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        except FileExistsError as exc:
-            raise ValidationError(
-                f"refusing to overwrite existing backup file '{path}' — backups are immutable"
-            ) from exc
-        with os.fdopen(fd, "wb") as fh:
-            fh.write(payload)
 
 
 @cache
