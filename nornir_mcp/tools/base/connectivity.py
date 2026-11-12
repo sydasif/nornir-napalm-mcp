@@ -144,9 +144,48 @@ def _extract_ping_rtt(output: str) -> float | None:
     Returns:
         The RTT in milliseconds, or None if it could not be parsed.
     """
-    for match in re.finditer(r"time[=<]\s*(\d+(?:\.\d+)?)\s*ms", output):
+    for match in re.finditer(r"\btime[=<]\s*(\d+(?:\.\d+)?)\s*ms", output):
         return float(match.group(1))
     return None
+
+
+def _calculate_subprocess_timeout(timeout_ms: int) -> float:
+    """Calculate subprocess timeout in seconds with a 2-second buffer."""
+    return timeout_ms / 1000.0 + 2.0
+
+
+def _calculate_latency_ms(start_time: float, end_time: float) -> float:
+    """Calculate latency in milliseconds from wall-clock timestamps."""
+    return (end_time - start_time) * 1000.0
+
+
+def _extract_error_detail(completed: subprocess.CompletedProcess[str]) -> str:
+    """Extract error detail from a failed ping CompletedProcess."""
+    error_detail = completed.stderr.strip()
+    if not error_detail:
+        error_detail = completed.stdout.strip()
+    if not error_detail:
+        error_detail = f"ping failed with return code {completed.returncode}"
+    return error_detail
+
+
+def _parse_ping_result(
+    completed: subprocess.CompletedProcess[str],
+    start_time: float,
+    end_time: float,
+) -> tuple[bool, float | None, str | None]:
+    """Parse ping result into (reachable, latency_ms, error_detail) - pure logic."""
+    if completed.returncode == 0:
+        rtt = _extract_ping_rtt(completed.stdout)
+        latency = rtt if rtt is not None else _calculate_latency_ms(start_time, end_time)
+        return (True, latency, None)
+    else:
+        return (False, None, _extract_error_detail(completed))
+
+
+def _format_tcp_error(exc: Exception) -> str:
+    """Format a TCP connection exception into an error detail string."""
+    return f"TCP connection failed: {exc}"
 
 
 def icmp_ping_host(
@@ -198,7 +237,7 @@ def icmp_ping_host(
         runner = default_runner
 
     # Calculate subprocess timeout in seconds (add 2 seconds buffer)
-    subprocess_timeout = timeout_ms / 1000.0 + 2.0
+    subprocess_timeout = _calculate_subprocess_timeout(timeout_ms)
 
     start_time = time.perf_counter()
     try:
@@ -213,23 +252,7 @@ def icmp_ping_host(
         return (False, None, f"ping failed: {exc}")
     end_time = time.perf_counter()
 
-    # Check the return code
-    if completed.returncode == 0:
-        # Try to parse the real RTT from ping output before falling back to
-        # process wall time (which is tens of ms of overhead). Common formats:
-        #   Linux/GNU:  time=23.4 ms
-        #   BSD/macOS:  time=23.446 ms
-        #   Windows:    Reply from ...: time<1 ms / time=23 ms
-        rtt = _extract_ping_rtt(completed.stdout)
-        return (True, rtt if rtt is not None else (end_time - start_time) * 1000.0, None)
-    else:
-        # Try to extract a meaningful error from stderr or stdout
-        error_detail = completed.stderr.strip()
-        if not error_detail:
-            error_detail = completed.stdout.strip()
-        if not error_detail:
-            error_detail = f"ping failed with return code {completed.returncode}"
-        return (False, None, error_detail)
+    return _parse_ping_result(completed, start_time, end_time)
 
 
 def check_tcp_host(
@@ -280,7 +303,7 @@ def check_tcp_host(
     try:
         conn = connector((validated_target, port), timeout_sec)
     except (OSError, TimeoutError) as exc:
-        return (False, None, f"TCP connection failed: {exc}")
+        return (False, None, _format_tcp_error(exc))
     end_time = time.perf_counter()
 
     # Success: measure latency, close the connection, never leak the socket.
@@ -289,5 +312,5 @@ def check_tcp_host(
     except Exception:  # noqa: BLE001 - best-effort close
         pass
 
-    latency_ms = (end_time - start_time) * 1000.0
+    latency_ms = _calculate_latency_ms(start_time, end_time)
     return (True, latency_ms, None)

@@ -46,6 +46,38 @@ def _now_utc() -> datetime:
     return datetime.now(UTC)
 
 
+def _generate_backup_id(now: datetime) -> str:
+    """Generate a microsecond-precision backup ID from a UTC timestamp."""
+    return now.strftime("%Y-%m-%dT%H-%M-%S_%fZ")
+
+
+def _calculate_sha256(content_bytes: bytes) -> str:
+    """Return the SHA-256 hex digest of *content_bytes*."""
+    return hashlib.sha256(content_bytes).hexdigest()
+
+
+def _build_backup_record(
+    host: str,
+    now: datetime,
+    trigger: Literal["standalone", "pre_change"],
+    change_id: str | None,
+    cfg_path: Path,
+    sha256: str,
+    size: int,
+) -> BackupRecord:
+    """Build a BackupRecord from pre-computed values (pure)."""
+    return BackupRecord(
+        backup_id=_generate_backup_id(now),
+        host=host,
+        timestamp=now.isoformat(),
+        path=str(cfg_path),
+        trigger=trigger,
+        change_id=change_id,
+        sha256=sha256,
+        size=size,
+    )
+
+
 class BackupRecord(BaseModel):
     """Metadata for one immutable backup."""
 
@@ -123,7 +155,7 @@ class FilesystemBackupStore:
 
         content_bytes = content.encode("utf-8")
         now = _now_utc()
-        backup_id = now.strftime("%Y-%m-%dT%H-%M-%S_%fZ")
+        backup_id = _generate_backup_id(now)
         cfg_path = self.root / host / f"{backup_id}.cfg"
         meta_path = self.root / host / f"{backup_id}.meta.json"
 
@@ -131,15 +163,16 @@ class FilesystemBackupStore:
         os.makedirs(self.root, mode=0o700, exist_ok=True)
         os.makedirs(host_dir, mode=0o700, exist_ok=True)
 
-        record = BackupRecord(
-            backup_id=backup_id,
+        sha256 = _calculate_sha256(content_bytes)
+        size = len(content_bytes)
+        record = _build_backup_record(
             host=host,
-            timestamp=now.isoformat(),
-            path=str(cfg_path),
+            now=now,
             trigger=trigger,
             change_id=change_id,
-            sha256=hashlib.sha256(content_bytes).hexdigest(),
-            size=len(content_bytes),
+            cfg_path=cfg_path,
+            sha256=sha256,
+            size=size,
         )
 
         # O_EXCL enforces immutability: never open an existing file.

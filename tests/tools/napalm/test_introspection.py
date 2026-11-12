@@ -98,3 +98,70 @@ def test_platform_none_host_is_skipped(monkeypatch: pytest.MonkeyPatch) -> None:
 
     results = introspection.list_getters()
     assert [r.platform for r in results] == ["eos"]
+
+
+def test_filter_overridden_getters_excludes_non_callable_attributes() -> None:
+    """get_ attributes that aren't callable (e.g. class vars) are skipped."""
+
+    class _Base:
+        def get_facts(self) -> str:
+            return "base"
+
+    class _Driver(_Base):
+        get_config = "not-a-getter"  # class variable shadowing a getter name
+
+        def get_arp_table(self) -> str:
+            return "driver"
+
+    assert introspection._filter_overridden_getters(_Driver, _Base) == ["arp_table"]
+
+
+def test_filter_overridden_getters_includes_driver_only_getter() -> None:
+    """A getter present only on the driver is included."""
+
+    class _Base:
+        def get_facts(self) -> str:
+            return "base"
+
+    class _Driver(_Base):
+        def get_bgp_neighbors(self) -> str:
+            return "driver"
+
+    assert introspection._filter_overridden_getters(_Driver, _Base) == ["bgp_neighbors"]
+
+
+def test_filter_overridden_getters_sorted_and_prefix_stripped() -> None:
+    """Names are sorted, multi-word names keep their underscores, prefix stripped."""
+
+    class _Base:
+        def get_facts(self) -> str:
+            return "base"
+
+    class _Driver(_Base):
+        def get_zebra(self) -> str:
+            return "a"
+
+        def get_acl_tables(self) -> str:
+            return "b"
+
+        def get_bgp_config(self) -> str:
+            return "c"
+
+    assert introspection._filter_overridden_getters(_Driver, _Base) == [
+        "acl_tables",
+        "bgp_config",
+        "zebra",
+    ]
+
+
+def test_filter_overridden_getters_all_inherited_returns_empty() -> None:
+    """A driver overriding nothing yields an empty list."""
+
+    class _Base:
+        def get_facts(self) -> str:
+            return "base"
+
+    class _Driver(_Base):
+        pass
+
+    assert introspection._filter_overridden_getters(_Driver, _Base) == []

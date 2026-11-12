@@ -1050,3 +1050,139 @@ def test_connectivity_tools_speak_envelope_contract(
         assert outcome.success is True
         assert outcome.data is not None
         assert set(outcome.data) == data_keys
+
+
+# ---------------------------------------------------------------------------
+# Pure helper tests (extracted during refactor)
+# ---------------------------------------------------------------------------
+
+
+def test_calculate_subprocess_timeout_adds_buffer() -> None:
+    """subprocess timeout is timeout_ms/1000 plus a 2-second buffer."""
+    from nornir_mcp.tools.base.connectivity import _calculate_subprocess_timeout
+
+    assert _calculate_subprocess_timeout(1000) == 3.0
+    assert _calculate_subprocess_timeout(500) == 2.5
+    assert _calculate_subprocess_timeout(0) == 2.0
+
+
+def test_calculate_latency_ms_converts_seconds_to_milliseconds() -> None:
+    """Wall-clock seconds become milliseconds."""
+    from nornir_mcp.tools.base.connectivity import _calculate_latency_ms
+
+    assert _calculate_latency_ms(0.0, 0.0) == 0.0
+    assert _calculate_latency_ms(0.0, 0.023) == 23.0
+    assert _calculate_latency_ms(1.0, 1.045) == pytest.approx(45.0)
+
+
+def test_extract_error_detail_prefers_stderr() -> None:
+    """stderr is returned when present."""
+    from nornir_mcp.tools.base.connectivity import _extract_error_detail
+
+    completed = subprocess.CompletedProcess(
+        [], returncode=1, stdout="junk", stderr=" Network is unreachable\n"
+    )
+    assert _extract_error_detail(completed) == "Network is unreachable"
+
+
+def test_extract_error_detail_falls_back_to_stdout() -> None:
+    """stdout is used when stderr is empty."""
+    from nornir_mcp.tools.base.connectivity import _extract_error_detail
+
+    completed = subprocess.CompletedProcess(
+        [], returncode=1, stdout=" 100% packet loss ", stderr=""
+    )
+    assert _extract_error_detail(completed) == "100% packet loss"
+
+
+def test_extract_error_detail_falls_back_to_returncode() -> None:
+    """A return-code message is used when both streams are empty."""
+    from nornir_mcp.tools.base.connectivity import _extract_error_detail
+
+    completed = subprocess.CompletedProcess([], returncode=2, stdout="", stderr="")
+    assert _extract_error_detail(completed) == "ping failed with return code 2"
+
+
+def test_parse_ping_result_success_uses_rtt_over_wall_time() -> None:
+    """On success, parsed RTT wins over wall-clock time."""
+    from nornir_mcp.tools.base.connectivity import _parse_ping_result
+
+    completed = subprocess.CompletedProcess(
+        [], returncode=0, stdout="64 bytes from 8.8.8.8: time=23.4 ms", stderr=""
+    )
+    reachable, latency, error = _parse_ping_result(completed, start_time=0.0, end_time=100.0)
+    assert (reachable, latency, error) == (True, 23.4, None)
+
+
+def test_parse_ping_result_success_falls_back_to_wall_time() -> None:
+    """Darwin-style output with no RTT falls back to wall-clock time."""
+    from nornir_mcp.tools.base.connectivity import _parse_ping_result
+
+    completed = subprocess.CompletedProcess(
+        [], returncode=0, stdout="64 bytes from ::1: icmp_seq=1 ttl=64", stderr=""
+    )
+    reachable, latency, error = _parse_ping_result(completed, start_time=0.0, end_time=0.011)
+    assert reachable is True
+    assert latency == 11.0
+    assert error is None
+
+
+def test_parse_ping_result_failure() -> None:
+    """Nonzero return code yields reachable=False and the error detail."""
+    from nornir_mcp.tools.base.connectivity import _parse_ping_result
+
+    completed = subprocess.CompletedProcess(
+        [], returncode=1, stdout="", stderr="Network is unreachable"
+    )
+    assert _parse_ping_result(completed, start_time=0.0, end_time=0.0) == (
+        False,
+        None,
+        "Network is unreachable",
+    )
+
+
+def test_format_tcp_error_prefixes_exception() -> None:
+    """_format_tcp_error prefixes the exception message."""
+    from nornir_mcp.tools.base.connectivity import _format_tcp_error
+
+    assert _format_tcp_error(OSError("Connection refused")) == (
+        "TCP connection failed: Connection refused"
+    )
+
+
+@pytest.mark.parametrize(
+    "output, expected",
+    [
+        ("64 bytes from 8.8.8.8: icmp_seq=1 ttl=115 time=23.4 ms", 23.4),
+        ("64 bytes from ::1: time=23.446 ms", 23.446),
+        ("Reply from 10.0.0.1: time=23 ms", 23.0),
+        ("Reply from 10.0.0.1: time<1 ms", 1.0),
+        ("64 bytes from ::1: icmp_seq=1 ttl=64", None),
+        ("", None),
+    ],
+)
+def test_extract_ping_rtt_vendor_formats(output: str, expected: float | None) -> None:
+    """RTT is parsed from GNU, BSD, and Windows formats, or None when absent."""
+    from nornir_mcp.tools.base.connectivity import _extract_ping_rtt
+
+    assert _extract_ping_rtt(output) == expected
+
+
+def test_extract_ping_rtt_word_boundary_avoids_uptime() -> None:
+    """The regex matches RTT, not ``uptime=`` substrings."""
+    from nornir_mcp.tools.base.connectivity import _extract_ping_rtt
+
+    output = "64 bytes from 10.0.0.1: uptime=123 ms time=5.0 ms"
+    assert _extract_ping_rtt(output) == 5.0
+
+
+def test_icmp_ping_host_success_returns_parsed_rtt(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Exact RTT is returned when parseable, not wall-clock time."""
+    from nornir_mcp.tools.base.connectivity import icmp_ping_host
+
+    def fake_runner(_cmd: list[str], _timeout: float) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess([], returncode=0, stdout="time=23.4 ms", stderr="")
+
+    _, latency_ms, error = icmp_ping_host("8.8.8.8", 1000, fake_runner)
+    assert latency_ms == 23.4
+    assert error is None

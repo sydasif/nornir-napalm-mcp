@@ -12,7 +12,13 @@ from pathlib import Path
 import pytest
 
 from nornir_mcp.core.errors import ValidationError
-from nornir_mcp.core.storage import FilesystemBackupStore
+from nornir_mcp.core.storage import (
+    BackupRecord,
+    FilesystemBackupStore,
+    _build_backup_record,
+    _calculate_sha256,
+    _generate_backup_id,
+)
 
 CONTENT = "hostname spine-01\ninterface Ethernet1\n"
 
@@ -109,3 +115,75 @@ def test_same_second_saves_do_not_collide(tmp_path: Path, monkeypatch: pytest.Mo
     assert Path(a.path).exists()
     assert Path(b.path).exists()
     assert len(store.list("spine-01")) == 2
+
+
+def test_generate_backup_id_format() -> None:
+    """backup_id is microsecond-precision with no path separators."""
+    now = datetime(2026, 1, 2, 3, 4, 5, 123456, tzinfo=UTC)
+    assert _generate_backup_id(now) == "2026-01-02T03-04-05_123456Z"
+    backup_id = _generate_backup_id(now)
+    assert "/" not in backup_id
+    assert ":" not in backup_id
+
+
+def test_generate_backup_id_zero_microseconds() -> None:
+    """Zero microseconds are zero-padded."""
+    now = datetime(2026, 1, 2, 3, 4, 5, 0, tzinfo=UTC)
+    assert _generate_backup_id(now) == "2026-01-02T03-04-05_000000Z"
+
+
+def test_calculate_sha256_known_vectors() -> None:
+    """SHA-256 matches known test vectors."""
+    assert _calculate_sha256(b"") == (
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    )
+    assert _calculate_sha256(b"abc") == (
+        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+    )
+
+
+def test_build_backup_record_field_mapping() -> None:
+    """_build_backup_record maps every field from pre-computed values."""
+    now = datetime(2026, 1, 2, 3, 4, 5, 123456, tzinfo=UTC)
+    cfg_path = Path("/backups/spine-01/2026-01-02T03-04-05_123456Z.cfg")
+    record = _build_backup_record(
+        host="spine-01",
+        now=now,
+        trigger="pre_change",
+        change_id="chg-1",
+        cfg_path=cfg_path,
+        sha256="deadbeef",
+        size=42,
+    )
+    assert record == BackupRecord(
+        backup_id=_generate_backup_id(now),
+        host="spine-01",
+        timestamp=now.isoformat(),
+        path=str(cfg_path),
+        trigger="pre_change",
+        change_id="chg-1",
+        sha256="deadbeef",
+        size=42,
+    )
+
+
+def test_build_backup_record_change_id_none() -> None:
+    """change_id=None is preserved when not supplied."""
+    now = datetime(2026, 1, 2, 3, 4, 5, tzinfo=UTC)
+    record = _build_backup_record(
+        host="leaf-01",
+        now=now,
+        trigger="standalone",
+        change_id=None,
+        cfg_path=Path("/x"),
+        sha256="abc",
+        size=1,
+    )
+    assert record.change_id is None
+
+
+def test_save_rejects_unknown_trigger(tmp_path: Path) -> None:
+    """Invalid trigger strings are rejected at save time (runtime guard)."""
+    store = FilesystemBackupStore(tmp_path / "backups")
+    with pytest.raises(ValidationError, match="invalid backup trigger"):
+        store.save("spine-01", CONTENT, trigger="evil")  # type: ignore[arg-type]

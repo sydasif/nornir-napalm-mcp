@@ -23,6 +23,20 @@ class GetterInfo(BaseModel):
     error: str | None = None
 
 
+def _filter_overridden_getters(driver_cls: type, base_cls: type) -> list[str]:
+    """Return sorted list of getter names overridden by *driver_cls* vs *base_cls*.
+
+    Pure logic: takes class objects and returns a list of strings.
+    """
+    return sorted(
+        name.removeprefix("get_")
+        for name in dir(driver_cls)
+        if name.startswith("get_")
+        and callable(getattr(driver_cls, name))
+        and getattr(driver_cls, name) is not getattr(base_cls, name, None)
+    )
+
+
 def list_getters() -> list[GetterInfo]:
     """Lists available NAPALM getters for each platform in the inventory.
 
@@ -53,13 +67,7 @@ def list_getters() -> list[GetterInfo]:
         error: str | None = None
         try:
             driver_cls = napalm.get_network_driver(platform)
-            getters = sorted(
-                name.removeprefix("get_")
-                for name in dir(driver_cls)
-                if name.startswith("get_")
-                and callable(getattr(driver_cls, name))
-                and getattr(driver_cls, name) is not getattr(NetworkDriver, name, None)
-            )
+            getters = _filter_overridden_getters(driver_cls, NetworkDriver)
         except Exception as exc:
             getters = []
             error = str(exc)
